@@ -77,7 +77,7 @@ func update(ctx context.Context, db *couch.Database) error {
 	g.Go(func() error {
 		r := &Response{}
 		if err := getTeslaURL(ctx,
-			urlBase+*vid+"/data_request/charge_state", st.Charge); err != nil {
+			urlBase+*vid+"/data_request/charge_state", r); err != nil {
 			return err
 		}
 		st.Charge = r.Response
