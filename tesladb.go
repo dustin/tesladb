@@ -72,7 +72,7 @@ func update(ctx context.Context, db *couch.Database) error {
 
 	g := errgroup.Group{}
 
-	st := &StateRecord{}
+	st := &StateRecord{Type: "state"}
 
 	g.Go(func() error {
 		r := &Response{}
