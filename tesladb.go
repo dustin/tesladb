@@ -51,13 +51,14 @@ func getTeslaURL(ctx context.Context, u string, o interface{}) error {
 }
 
 type StateRecord struct {
-	Type string           `json:"type"`
-	Data *json.RawMessage `json:"data"`
+	Type   string           `json:"type"`
+	Charge *json.RawMessage `json:"charge"`
+	Drive  *json.RawMessage `json:"drive"`
 }
 
-func storeData(ctx context.Context, db *couch.Database, typ string, r *json.RawMessage) error {
-	did := typ + "_" + time.Now().Format("20060102150405Z")
-	_, _, err := db.InsertWith(&StateRecord{typ, r}, did)
+func storeData(ctx context.Context, db *couch.Database, st *StateRecord) error {
+	did := "state_" + time.Now().Format("20060102150405Z")
+	_, _, err := db.InsertWith(st, did)
 	return err
 }
 
@@ -71,14 +72,16 @@ func update(ctx context.Context, db *couch.Database) error {
 
 	g := errgroup.Group{}
 
+	st := &StateRecord{}
+
 	g.Go(func() error {
 		r := &Response{}
 		if err := getTeslaURL(ctx,
-			urlBase+*vid+"/data_request/charge_state", r); err != nil {
+			urlBase+*vid+"/data_request/charge_state", st.Charge); err != nil {
 			return err
 		}
-
-		return storeData(ctx, db, "charge_state", r.Response)
+		st.Charge = r.Response
+		return nil
 	})
 
 	g.Go(func() error {
@@ -88,10 +91,15 @@ func update(ctx context.Context, db *couch.Database) error {
 			return err
 		}
 
-		return storeData(ctx, db, "drive_state", r.Response)
+		st.Drive = r.Response
+		return nil
 	})
 
-	return g.Wait()
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	return storeData(ctx, db, st)
 }
 
 func main() {
