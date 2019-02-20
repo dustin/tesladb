@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dustin/httputil"
+	_ "github.com/mattn/go-sqlite3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/yosssi/gmq/mqtt"
@@ -30,6 +32,9 @@ var (
 	vid    = flag.String("vid", "", "vehicle ID")
 	period = flag.Duration("period", time.Minute*10, "update period")
 	base   = flag.String("base", "", "path to store data")
+	dbpath = flag.String("dbpath", "", "path to store data in sqlite")
+
+	db *sql.DB
 )
 
 func getTeslaURL(ctx context.Context, u string, o interface{}) error {
@@ -90,6 +95,23 @@ func storeData(ctx context.Context, mcli *client.Client, st *StateRecord) error 
 		})
 	})
 
+	g.Go(func() error {
+		if db == nil {
+			return nil
+		}
+		j, err := json.Marshal(st.Data)
+		if err != nil {
+			return err
+		}
+
+		stmt, err := db.Prepare("insert into data(ts, data) values(?, ?)")
+		if err != nil {
+			return err
+		}
+		_, err = stmt.Exec(t, j)
+		return err
+	})
+
 	return g.Wait()
 }
 
@@ -136,10 +158,27 @@ func update(ctx context.Context, mcli *client.Client) (time.Duration, error) {
 	return delay, storeData(ctx, mcli, st)
 }
 
+func initDB() error {
+	if *dbpath == "" {
+		return nil
+	}
+	var err error
+	db, err = sql.Open("sqlite3", *dbpath)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`create table if not exists data (ts timestamp, data blob)`)
+	return err
+}
+
 func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
+	if err := initDB(); err != nil {
+		log.Fatalf("Error initializating database: %v", err)
+	}
 
 	mcli := client.New(&client.Options{
 		// Define the processing of the error handler.
