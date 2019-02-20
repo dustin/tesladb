@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"path"
 	"time"
 
-	couch "github.com/dustin/go-couch"
 	"github.com/dustin/httputil"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/yosssi/gmq/mqtt"
+	"github.com/yosssi/gmq/mqtt/client"
 )
 
 const (
@@ -21,10 +26,10 @@ const (
 )
 
 var (
-	bearer   = flag.String("bearer", "", "auth bearer token")
-	vid      = flag.String("vid", "", "vehicle ID")
-	period   = flag.Duration("period", time.Minute*10, "update period")
-	couchURL = flag.String("couch", "http://localhost:5984/tesla", "couch db url")
+	bearer = flag.String("bearer", "", "auth bearer token")
+	vid    = flag.String("vid", "", "vehicle ID")
+	period = flag.Duration("period", time.Minute*10, "update period")
+	base   = flag.String("base", "", "path to store data")
 )
 
 func getTeslaURL(ctx context.Context, u string, o interface{}) error {
@@ -51,55 +56,84 @@ func getTeslaURL(ctx context.Context, u string, o interface{}) error {
 }
 
 type StateRecord struct {
-	Type   string           `json:"type"`
-	Charge *json.RawMessage `json:"charge"`
-	Drive  *json.RawMessage `json:"drive"`
+	Type string           `json:"type"`
+	Data *json.RawMessage `json:"data"`
 }
 
-func storeData(ctx context.Context, db *couch.Database, st *StateRecord) error {
-	did := "state_" + time.Now().Format("20060102150405Z")
-	_, _, err := db.InsertWith(st, did)
-	return err
+func storeData(ctx context.Context, mcli *client.Client, st *StateRecord) error {
+	t := time.Now()
+	dir := path.Join(*base, t.Format("2006/01/02"))
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		return err
+	}
+
+	g := errgroup.Group{}
+
+	g.Go(func() error {
+		fn := path.Join(dir, t.Format("150405.json"))
+		j, err := json.Marshal(st)
+		if err != nil {
+			return err
+		}
+		return ioutil.WriteFile(fn, j, 0666)
+	})
+
+	g.Go(func() error {
+		j, err := json.Marshal(st.Data)
+		if err != nil {
+			return err
+		}
+		return mcli.Publish(&client.PublishOptions{
+			QoS:       mqtt.QoS1,
+			TopicName: []byte("tesla/x/data"),
+			Message:   j,
+		})
+	})
+
+	return g.Wait()
 }
 
 type Response struct {
 	Response *json.RawMessage
 }
 
-func update(ctx context.Context, db *couch.Database) error {
+func update(ctx context.Context, mcli *client.Client) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	g := errgroup.Group{}
-
 	st := &StateRecord{Type: "state"}
 
-	g.Go(func() error {
-		r := &Response{}
-		if err := getTeslaURL(ctx,
-			urlBase+*vid+"/data_request/charge_state", r); err != nil {
-			return err
-		}
-		st.Charge = r.Response
-		return nil
-	})
+	bits := &struct {
+		VehicleState struct {
+			IsUserPresent bool `json:"is_user_present"`
+		} `json:"vehicle_state"`
+		ChargeState struct {
+			ChargerPower int `json:"charger_power"`
+		} `json:"charge_state"`
+	}{}
 
-	g.Go(func() error {
-		r := &Response{}
-		if err := getTeslaURL(ctx,
-			urlBase+*vid+"/data_request/drive_state", r); err != nil {
-			return err
-		}
+	r := &Response{}
+	if err := getTeslaURL(ctx,
+		urlBase+*vid+"/vehicle_data", r); err != nil {
+		return *period, err
+	}
+	st.Data = r.Response
 
-		st.Drive = r.Response
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
-		return err
+	if err := json.Unmarshal(*r.Response, bits); err != nil {
+		return *period, err
 	}
 
-	return storeData(ctx, db, st)
+	delay := *period
+	switch {
+	case bits.VehicleState.IsUserPresent:
+		log.Printf("User is present.")
+		delay = time.Minute
+	case bits.ChargeState.ChargerPower > 0:
+		log.Printf("Charging at %v", bits.ChargeState.ChargerPower)
+		delay = time.Minute * 5
+	}
+
+	return delay, storeData(ctx, mcli, st)
 }
 
 func main() {
@@ -107,17 +141,37 @@ func main() {
 
 	ctx := context.Background()
 
-	db, err := couch.Connect(*couchURL)
+	mcli := client.New(&client.Options{
+		// Define the processing of the error handler.
+		ErrorHandler: func(err error) {
+			log.Fatalf("Error handling MQTT: %v", err)
+		},
+	})
+
+	// Connect to the MQTT Server.
+	err := mcli.Connect(&client.ConnectOptions{
+		CleanSession: true,
+		Network:      "tcp",
+		Address:      "eve:1883",
+		ClientID:     []byte("tesladb"),
+	})
 	if err != nil {
-		log.Fatalf("Can't connect to DB: %v", err)
+		log.Fatalf("Error connecting to MQTT: %v", err)
 	}
 
-	if err := update(ctx, &db); err != nil {
-		log.Fatalf("Error on first run: %v", err)
+	delay, err := update(ctx, mcli)
+	if err != nil {
+		log.Fatalf("Error fetching tesla data on first run: %v", err)
 	}
-	for range time.Tick(*period) {
-		if err := update(ctx, &db); err != nil {
-			log.Printf("Error updating: %v", err)
+	for {
+		if delay < time.Minute {
+			log.Fatalf("Unexpectedly short delay: %v", delay)
+		}
+		log.Printf("Sleeping for %v", delay)
+		time.Sleep(delay)
+		delay, err = update(ctx, mcli)
+		if err != nil {
+			log.Printf("Error fetching tesla data: %v", err)
 		}
 	}
 }
