@@ -1,2 +1,4 @@
-/tesladb
 *~
+.stack-work/
+/tesla.db
+tesladb.cabal
