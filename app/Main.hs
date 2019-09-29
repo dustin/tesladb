@@ -4,7 +4,7 @@
 module Main where
 
 import           Control.Concurrent       (threadDelay)
-import           Control.Concurrent.Async (mapConcurrently_)
+import           Control.Concurrent.Async (mapConcurrently_, race_)
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            newBroadcastTChanIO, readTChan,
                                            writeTChan)
@@ -49,23 +49,20 @@ insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 
 dbSink :: Options -> TChan VehicleData -> IO ()
 dbSink Options{..} ch = do
-  rch <- atomically $ dupTChan ch
-  withConnection optDBPath (storeThings rch)
+  withConnection optDBPath storeThings
 
   where
-    storeThings rch db = do
+    storeThings db = do
       execute_ db "pragma auto_vacuum = incremental"
       execute_ db createStatement
 
       forever $ do
-        vdata <- atomically $ readTChan rch
+        vdata <- atomically $ readTChan ch
         execute db insertStatement (Only vdata)
 
 mqttSink :: Options -> TChan VehicleData -> IO ()
 mqttSink Options{..} ch = do
-  rch <- atomically $ dupTChan ch
-
-  withMQTT (store rch)
+  withMQTT store
 
   where
     withMQTT = bracket connect normalDisconnect
@@ -76,8 +73,8 @@ mqttSink Options{..} ch = do
       infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
       pure mc
 
-    store rch mc = forever $ do
-      vdata <- atomically $ readTChan rch
+    store mc = forever $ do
+      vdata <- atomically $ readTChan ch
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
 
@@ -108,8 +105,9 @@ gather Options{..} ch = do
 run :: Options -> IO ()
 run opts = do
   tch <- newBroadcastTChanIO
+  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) [dbSink, mqttSink])
 
-  mapConcurrently_ (\f -> f opts tch) [gather, dbSink, mqttSink]
+  where d ch = atomically $ dupTChan ch
 
 main :: IO ()
 main = do
