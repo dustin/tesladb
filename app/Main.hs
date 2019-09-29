@@ -8,7 +8,7 @@ import           Control.Concurrent.Async (mapConcurrently_, race_)
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            newBroadcastTChanIO, readTChan,
                                            writeTChan)
-import           Control.Exception        (bracket)
+import           Control.Exception        (SomeException (..), bracket, catch)
 import           Control.Monad            (forever)
 import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (fromJust)
@@ -20,7 +20,7 @@ import           Options.Applicative      (Parser, execParser, fullDesc, help,
                                            helper, info, long, maybeReader,
                                            option, progDesc, showDefault,
                                            strOption, value, (<**>))
-import           System.Log.Logger        (Priority (INFO), infoM,
+import           System.Log.Logger        (Priority (INFO), errorM, infoM,
                                            rootLoggerName, setLevel,
                                            updateGlobalLogger)
 
@@ -47,7 +47,20 @@ createStatement = "create table if not exists data (ts timestamp, data blob)"
 insertStatement :: Query
 insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 
-dbSink :: Options -> TChan VehicleData -> IO ()
+type Sink = Options -> TChan VehicleData -> IO ()
+
+retry :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
+retry n s opts ch = forever $ do
+  catch (s opts ch) handler
+
+  where
+    handler :: SomeException -> IO ()
+    handler e = do
+      errorM rootLoggerName $ mconcat ["Caught exception in handler: ", n, " - ", show e, " retrying shortly"]
+      threadDelay 5000000
+
+
+dbSink :: Sink
 dbSink Options{..} ch = do
   withConnection optDBPath storeThings
 
@@ -60,7 +73,7 @@ dbSink Options{..} ch = do
         vdata <- atomically $ readTChan ch
         execute db insertStatement (Only vdata)
 
-mqttSink :: Options -> TChan VehicleData -> IO ()
+mqttSink :: Sink
 mqttSink Options{..} ch = do
   withMQTT store
 
@@ -105,7 +118,7 @@ gather Options{..} ch = do
 run :: Options -> IO ()
 run opts = do
   tch <- newBroadcastTChanIO
-  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) [dbSink, mqttSink])
+  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) [dbSink, retry "mqtt" mqttSink])
 
   where d ch = atomically $ dupTChan ch
 
