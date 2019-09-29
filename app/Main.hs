@@ -49,13 +49,16 @@ insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 dbSink :: Options -> TChan VehicleData -> IO ()
 dbSink Options{..} ch = do
   rch <- atomically $ dupTChan ch
-  db <- open optDBPath
-  execute_ db "pragma auto_vacuum = incremental"
-  execute_ db createStatement
+  withConnection optDBPath (storeThings rch)
 
-  forever $ do
-    vdata <- atomically $ readTChan rch
-    execute db insertStatement (Only vdata)
+  where
+    storeThings rch db = do
+      execute_ db "pragma auto_vacuum = incremental"
+      execute_ db createStatement
+
+      forever $ do
+        vdata <- atomically $ readTChan rch
+        execute db insertStatement (Only vdata)
 
 mqttSink :: Options -> TChan VehicleData -> IO ()
 mqttSink Options{..} ch = do
