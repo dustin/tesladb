@@ -23,11 +23,11 @@ import           System.Log.Logger        (Priority (INFO), infoM,
                                            rootLoggerName, setLevel,
                                            updateGlobalLogger)
 import           Tesla
+import AuthDB
 
 data Options = Options {
   optDBPath      :: String
   , optVName     :: Text
-  , optBearer    :: String
   , optMQTTURI   :: URI
   , optMQTTTopic :: Text
   }
@@ -36,7 +36,6 @@ options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
   <*> strOption (long "vname" <> showDefault <> value "my car" <> help "name of vehicle to watch")
-  <*> strOption (long "bearer" <> help "authentication bearer token")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
 
@@ -70,7 +69,8 @@ mqttSink Options{..} ch = do
                                               PropContentType "application/json"]
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
-  let ai = fromToken optBearer
+  ar <- loadAuth optDBPath
+  let ai = fromToken (_access_token ar)
 
   vids <- vehicles ai
   let vid = vids Map.! optVName
@@ -88,8 +88,8 @@ gather Options{..} ch = do
 
   where naptime vdata
           | isUserPresent vdata = 60000000
-          | isCharging vdata   = 300000000
-          | otherwise           =  600000000
+          | isCharging vdata    = 300000000
+          | otherwise           = 600000000
 
 run :: Options -> IO ()
 run opts = do

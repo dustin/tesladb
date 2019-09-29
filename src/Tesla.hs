@@ -3,7 +3,7 @@
 {-# LANGUAGE RecordWildCards   #-}
 
 module Tesla
-    ( authenticate, AuthResponse(..), vehicles, AuthInfo(..),
+    ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
       fromToken, vehicleData, VehicleData,
       isUserPresent, isCharging
     ) where
@@ -30,6 +30,8 @@ baseURL :: String
 baseURL = "https://owner-api.teslamotors.com/"
 authURL :: String
 authURL = baseURL <> "oauth/token"
+authRefreshURL :: String
+authRefreshURL = baseURL <> "oauth/token"
 vehiclesURL :: String
 vehiclesURL = baseURL <> "api/1/vehicles"
 
@@ -75,6 +77,15 @@ authenticate AuthInfo{..} = do
                                             "email" := _email,
                                             "password" := _password] :: IO (Response AuthResponse)
   pure $ r ^. responseBody
+
+refreshAuth :: AuthInfo -> AuthResponse -> IO AuthResponse
+refreshAuth AuthInfo{..} AuthResponse{..} = do
+  r <- asJSON =<< postWith defOpts authRefreshURL ["grant_type" := ("refresh_token" :: String),
+                                                   "client_id" := _clientID,
+                                                   "client_secret" := _clientSecret,
+                                                   "refresh_token" := _refresh_token] :: IO (Response AuthResponse)
+  pure $ r ^. responseBody
+
 
 authOpts :: AuthInfo -> Network.Wreq.Options
 authOpts AuthInfo{..} = defOpts & header "Authorization" .~ ["Bearer " <> BC.pack _bearerToken]
