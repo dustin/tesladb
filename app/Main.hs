@@ -22,8 +22,9 @@ import           Options.Applicative      (Parser, execParser, fullDesc, help,
 import           System.Log.Logger        (Priority (INFO), infoM,
                                            rootLoggerName, setLevel,
                                            updateGlobalLogger)
+
+import           AuthDB
 import           Tesla
-import AuthDB
 
 data Options = Options {
   optDBPath      :: String
@@ -69,16 +70,13 @@ mqttSink Options{..} ch = do
                                               PropContentType "application/json"]
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
-  ar <- loadAuth optDBPath
-  let ai = fromToken (_access_token ar)
-
-  vids <- vehicles ai
+  vids <- vehicles =<< toke
   let vid = vids Map.! optVName
   infoM rootLoggerName $ mconcat ["Looping with vid: ", show vid]
 
   forever $ do
-    vdata <- vehicleData ai (unpack vid)
-    infoM rootLoggerName $ mconcat ["Stored some data for vid: ", show vid]
+    vdata <- toke >>= \ai -> vehicleData ai (unpack vid)
+    infoM rootLoggerName $ mconcat ["Fetched data for vid: ", show vid]
     atomically $ writeTChan ch vdata
     let nt = naptime vdata
     infoM rootLoggerName $ mconcat ["Sleeping for ", show nt,
@@ -90,6 +88,9 @@ gather Options{..} ch = do
           | isUserPresent vdata = 60000000
           | isCharging vdata    = 300000000
           | otherwise           = 600000000
+
+        toke :: IO AuthInfo
+        toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
 run :: Options -> IO ()
 run opts = do
