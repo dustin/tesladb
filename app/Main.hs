@@ -8,6 +8,7 @@ import           Control.Concurrent.Async (mapConcurrently_)
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            newBroadcastTChanIO, readTChan,
                                            writeTChan)
+import           Control.Exception        (bracket)
 import           Control.Monad            (forever)
 import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (fromJust)
@@ -63,14 +64,22 @@ dbSink Options{..} ch = do
 mqttSink :: Options -> TChan VehicleData -> IO ()
 mqttSink Options{..} ch = do
   rch <- atomically $ dupTChan ch
-  mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
-  props <- svrProps mc
-  infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
 
-  forever $ do
-    vdata <- atomically $ readTChan rch
-    publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
-                                              PropContentType "application/json"]
+  withMQTT (store rch)
+
+  where
+    withMQTT = bracket connect normalDisconnect
+
+    connect = do
+      mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
+      props <- svrProps mc
+      infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
+      pure mc
+
+    store rch mc = forever $ do
+      vdata <- atomically $ readTChan rch
+      publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
+                                                PropContentType "application/json"]
 
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
