@@ -65,3 +65,7 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - tesladb
+    - HUnit
+    - tasty
+    - tasty-hunit
+    - tasty-quickcheck

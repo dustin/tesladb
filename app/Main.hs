@@ -80,7 +80,16 @@ gather Options{..} ch = do
     vdata <- vehicleData ai (unpack vid)
     infoM rootLoggerName $ mconcat ["Stored some data for vid: ", show vid]
     atomically $ writeTChan ch vdata
-    threadDelay 600000000
+    let nt = naptime vdata
+    infoM rootLoggerName $ mconcat ["Sleeping for ", show nt,
+                                    " user present: ", show $ isUserPresent vdata,
+                                    ", charging: ", show $ isCharging vdata]
+    threadDelay nt
+
+  where naptime vdata
+          | isUserPresent vdata = 60000000
+          | isCharging vdata   = 300000000
+          | otherwise           =  600000000
 
 run :: Options -> IO ()
 run opts = do
