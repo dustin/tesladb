@@ -71,6 +71,7 @@ mqttSink Options{..} ch = do
     vdata <- atomically $ readTChan rch
     publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                               PropContentType "application/json"]
+
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
   vids <- vehicles =<< toke
