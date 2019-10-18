@@ -53,8 +53,7 @@ insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 type Sink = Options -> TChan VehicleData -> IO ()
 
 retry :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
-retry n s opts ch = forever $ do
-  catch (s opts ch) handler
+retry n s opts ch = forever $ catch (s opts ch) handler
 
   where
     handler :: SomeException -> IO ()
@@ -64,8 +63,7 @@ retry n s opts ch = forever $ do
 
 
 dbSink :: Sink
-dbSink Options{..} ch = do
-  withConnection optDBPath storeThings
+dbSink Options{..} ch = withConnection optDBPath storeThings
 
   where
     storeThings db = do
@@ -77,8 +75,7 @@ dbSink Options{..} ch = do
         execute db insertStatement (Only vdata)
 
 mqttSink :: Sink
-mqttSink Options{..} ch = do
-  withMQTT store
+mqttSink Options{..} ch = withMQTT store
 
   where
     withMQTT = bracket connect normalDisconnect
