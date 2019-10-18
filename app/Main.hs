@@ -1,3 +1,4 @@
+{-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
@@ -19,7 +20,7 @@ import           Network.URI
 import           Options.Applicative      (Parser, execParser, fullDesc, help,
                                            helper, info, long, maybeReader,
                                            option, progDesc, showDefault,
-                                           strOption, value, (<**>))
+                                           strOption, switch, value, (<**>))
 import           System.Log.Logger        (Priority (INFO), errorM, infoM,
                                            rootLoggerName, setLevel,
                                            updateGlobalLogger)
@@ -30,6 +31,7 @@ import           Tesla
 data Options = Options {
   optDBPath      :: String
   , optVName     :: Text
+  , optNoMQTT    :: Bool
   , optMQTTURI   :: URI
   , optMQTTTopic :: Text
   }
@@ -38,6 +40,7 @@ options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
   <*> strOption (long "vname" <> showDefault <> value "my car" <> help "name of vehicle to watch")
+  <*> switch (long "disable-mqtt" <> help "disable MQTT support")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
 
@@ -116,9 +119,10 @@ gather Options{..} ch = do
         toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
 run :: Options -> IO ()
-run opts = do
+run opts@Options{optNoMQTT} = do
   tch <- newBroadcastTChanIO
-  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) [dbSink, retry "mqtt" mqttSink])
+  let sinks = [dbSink] <> if optNoMQTT then [] else [retry "mqtt" mqttSink]
+  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) sinks)
 
   where d ch = atomically $ dupTChan ch
 
