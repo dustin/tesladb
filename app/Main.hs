@@ -10,7 +10,7 @@ import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            newBroadcastTChanIO, readTChan,
                                            writeTChan)
 import           Control.Exception        (SomeException (..), bracket, catch)
-import           Control.Monad            (forever)
+import           Control.Monad            (forever, when)
 import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (fromJust)
 import           Data.Text                (Text, unpack)
@@ -92,7 +92,10 @@ mqttSink Options{..} ch = withMQTT store
       infoM rootLoggerName ("disconnected from " <> show optMQTTURI)
 
     store mc = forever $ do
-      vdata <- atomically $ readTChan ch
+      vdata <- atomically $ do
+        connd <- isConnectedSTM mc
+        when (not connd) $ fail ("disconnected from " <> show optMQTTURI)
+        readTChan ch
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
 
