@@ -78,13 +78,18 @@ mqttSink :: Sink
 mqttSink Options{..} ch = withMQTT store
 
   where
-    withMQTT = bracket connect normalDisconnect
+    withMQTT = bracket connect disco
 
     connect = do
       mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
       props <- svrProps mc
       infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
       pure mc
+
+    disco c = do
+      errorM rootLoggerName ("disconnecting from " <> show optMQTTURI)
+      normalDisconnect c
+      infoM rootLoggerName ("disconnected from " <> show optMQTTURI)
 
     store mc = forever $ do
       vdata <- atomically $ readTChan ch
