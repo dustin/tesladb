@@ -9,7 +9,8 @@ import           Control.Concurrent.Async (mapConcurrently_, race_)
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            newBroadcastTChanIO, readTChan,
                                            writeTChan)
-import           Control.Exception        (SomeException (..), bracket, catch)
+import           Control.Exception        (Exception, SomeException (..),
+                                           bracket, catch, throw)
 import           Control.Monad            (forever, when)
 import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (fromJust)
@@ -75,6 +76,10 @@ dbSink Options{..} ch = withConnection optDBPath storeThings
         vdata <- atomically $ readTChan ch
         execute db insertStatement (Only vdata)
 
+data DisconnectedException = DisconnectedException deriving Show
+
+instance Exception DisconnectedException
+
 mqttSink :: Sink
 mqttSink Options{..} ch = withMQTT store
 
@@ -95,7 +100,7 @@ mqttSink Options{..} ch = withMQTT store
     store mc = forever $ do
       vdata <- atomically $ do
         connd <- isConnectedSTM mc
-        when (not connd) $ fail ("disconnected from " <> show optMQTTURI)
+        when (not connd) $ throw DisconnectedException
         readTChan ch
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
