@@ -24,6 +24,7 @@ import           Options.Applicative      (Parser, execParser, fullDesc, help,
 import           System.Log.Logger        (Priority (INFO), errorM, infoM,
                                            rootLoggerName, setLevel,
                                            updateGlobalLogger)
+import           System.Timeout           (timeout)
 
 import           AuthDB
 import           Tesla
@@ -106,22 +107,31 @@ gather Options{..} ch = do
   infoM rootLoggerName $ mconcat ["Looping with vid: ", show vid]
 
   forever $ do
-    vdata <- toke >>= \ai -> vehicleData ai (unpack vid)
-    infoM rootLoggerName $ mconcat ["Fetched data for vid: ", show vid]
-    atomically $ writeTChan ch vdata
-    let nt = naptime vdata
-    infoM rootLoggerName $ mconcat ["Sleeping for ", show nt,
-                                    " user present: ", show $ isUserPresent vdata,
-                                    ", charging: ", show $ isCharging vdata]
+    infoM rootLoggerName "Fetching"
+    vdata <- toke >>= \ai -> timeout 10000000 $ vehicleData ai (unpack vid)
+    nt <- process vid vdata
     threadDelay nt
 
-  where naptime vdata
+  where
+    naptime :: VehicleData -> Int
+    naptime vdata
           | isUserPresent vdata = 60000000
           | isCharging vdata    = 300000000
           | otherwise           = 600000000
 
-        toke :: IO AuthInfo
-        toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
+    process :: Text -> Maybe VehicleData -> IO Int
+    process _ Nothing = errorM rootLoggerName "Timed out, retrying in 60s" >> pure 60000000
+    process vid (Just vdata) = do
+      infoM rootLoggerName $ mconcat ["Fetched data for vid: ", show vid]
+      atomically $ writeTChan ch vdata
+      let nt = naptime vdata
+      infoM rootLoggerName $ mconcat ["Sleeping for ", show nt,
+                                      " user present: ", show $ isUserPresent vdata,
+                                      ", charging: ", show $ isCharging vdata]
+      pure $ naptime vdata
+
+    toke :: IO AuthInfo
+    toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT} = do

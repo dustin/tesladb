@@ -40,7 +40,7 @@ packages:
 extra-deps:
 # - net-mqtt-0.6.0.1
 - git: https://github.com/dustin/mqtt-hs.git
-  commit: 91b253b791aa3f7d22aefaa11e23f7fef288a97b
+  commit: cfd9c9e71aa6e74b295256e591761e420203e531
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
