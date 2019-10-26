@@ -20,11 +20,11 @@ import           Network.MQTT.Client
 import           Network.URI
 import           Options.Applicative      (Parser, execParser, fullDesc, help,
                                            helper, info, long, maybeReader,
-                                           option, progDesc, showDefault,
+                                           option, progDesc, short, showDefault,
                                            strOption, switch, value, (<**>))
-import           System.Log.Logger        (Priority (INFO), errorM, infoM,
-                                           rootLoggerName, setLevel,
-                                           updateGlobalLogger)
+import           System.Log.Logger        (Priority (DEBUG, INFO), debugM,
+                                           errorM, infoM, rootLoggerName,
+                                           setLevel, updateGlobalLogger)
 import           System.Timeout           (timeout)
 
 import           AuthDB
@@ -34,6 +34,7 @@ data Options = Options {
   optDBPath      :: String
   , optVName     :: Text
   , optNoMQTT    :: Bool
+  , optVerbose   :: Bool
   , optMQTTURI   :: URI
   , optMQTTTopic :: Text
   }
@@ -43,6 +44,7 @@ options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
   <*> strOption (long "vname" <> showDefault <> value "my car" <> help "name of vehicle to watch")
   <*> switch (long "disable-mqtt" <> help "disable MQTT support")
+  <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
 
@@ -102,8 +104,10 @@ mqttSink Options{..} ch = withMQTT store
         connd <- isConnectedSTM mc
         when (not connd) $ throw DisconnectedException
         readTChan ch
+      debugM rootLoggerName "Delivering vdata via MQTT"
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
+      debugM rootLoggerName "Delivered vdata via MQTT"
 
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
@@ -112,7 +116,7 @@ gather Options{..} ch = do
   infoM rootLoggerName $ mconcat ["Looping with vid: ", show vid]
 
   forever $ do
-    infoM rootLoggerName "Fetching"
+    debugM rootLoggerName "Fetching"
     vdata <- toke >>= \ai -> timeout 10000000 $ vehicleData ai (unpack vid)
     nt <- process vid vdata
     threadDelay nt
@@ -139,7 +143,9 @@ gather Options{..} ch = do
     toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
 run :: Options -> IO ()
-run opts@Options{optNoMQTT} = do
+run opts@Options{optNoMQTT, optVerbose} = do
+  updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
+
   tch <- newBroadcastTChanIO
   let sinks = [dbSink] <> if optNoMQTT then [] else [retry "mqtt" mqttSink]
   race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) sinks)
@@ -147,9 +153,7 @@ run opts@Options{optNoMQTT} = do
   where d ch = atomically $ dupTChan ch
 
 main :: IO ()
-main = do
-  updateGlobalLogger rootLoggerName (setLevel INFO)
-  run =<< execParser opts
+main = run =<< execParser opts
 
   where opts = info (options <**> helper)
           ( fullDesc <> progDesc "Move stuff.")
