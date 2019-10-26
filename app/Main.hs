@@ -89,6 +89,7 @@ mqttSink Options{..} ch = withMQTT store
     withMQTT = bracket connect disco
 
     connect = do
+      infoM rootLoggerName $ mconcat ["Connecting to ", show optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
       props <- svrProps mc
       infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
