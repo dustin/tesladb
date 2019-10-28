@@ -7,8 +7,9 @@ module Main where
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (mapConcurrently_, race_)
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
-                                           newBroadcastTChanIO, readTChan,
-                                           writeTChan)
+                                           newBroadcastTChanIO, orElse,
+                                           readTChan, readTVar, registerDelay,
+                                           retry, writeTChan)
 import           Control.Exception        (Exception, SomeException (..),
                                            bracket, catch, throw)
 import           Control.Monad            (forever, when)
@@ -22,6 +23,7 @@ import           Options.Applicative      (Parser, execParser, fullDesc, help,
                                            helper, info, long, maybeReader,
                                            option, progDesc, short, showDefault,
                                            strOption, switch, value, (<**>))
+import           System.Exit              (die)
 import           System.Log.Logger        (Priority (DEBUG, INFO), debugM,
                                            errorM, infoM, rootLoggerName,
                                            setLevel, updateGlobalLogger)
@@ -56,8 +58,8 @@ insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 
 type Sink = Options -> TChan VehicleData -> IO ()
 
-retry :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
-retry n s opts ch = forever $ catch (s opts ch) handler
+excLoop :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
+excLoop n s opts ch = forever $ catch (s opts ch) handler
 
   where
     handler :: SomeException -> IO ()
@@ -65,6 +67,18 @@ retry n s opts ch = forever $ catch (s opts ch) handler
       errorM rootLoggerName $ mconcat ["Caught exception in handler: ", n, " - ", show e, " retrying shortly"]
       threadDelay 5000000
 
+watchdogSink :: Sink
+watchdogSink o ch = do
+  tov <- registerDelay (3*600000000)
+  again <- atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
+  when (not again) $ die "Watchdog timeout"
+  watchdogSink o ch
+
+    where
+      checkTimeout v = do
+        v' <- readTVar v
+        when (not v') retry
+        pure False
 
 dbSink :: Sink
 dbSink Options{..} ch = withConnection optDBPath storeThings
@@ -148,7 +162,7 @@ run opts@Options{optNoMQTT, optVerbose} = do
   updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
 
   tch <- newBroadcastTChanIO
-  let sinks = [dbSink] <> if optNoMQTT then [] else [retry "mqtt" mqttSink]
+  let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
   race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) sinks)
 
   where d ch = atomically $ dupTChan ch
