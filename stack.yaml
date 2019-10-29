@@ -38,8 +38,7 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- git: https://github.com/dustin/mqtt-hs
-  commit: 50634bada037406bceba7ab13fd7632a97a2ff82
+- net-mqtt-0.6.1.1
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
