@@ -50,6 +50,7 @@ executables:
     ghc-options:
     - -threaded
     - -rtsopts
+    - -eventlog
     - -with-rtsopts=-N
     - -Wall
     dependencies:
