@@ -5,14 +5,15 @@ module Main where
 
 import           Data.Maybe             (fromJust)
 import           Data.Text              (Text)
+import           Data.Word              (Word32)
 import           Database.SQLite.Simple hiding (bind, close)
 import           Network.MQTT.Client
 import           Network.MQTT.Types     (RetainHandling (..))
 import           Network.URI
-import           Options.Applicative    (Parser, execParser, fullDesc, help,
+import           Options.Applicative    (Parser, auto, execParser, fullDesc,
                                          help, helper, info, long, maybeReader,
                                          option, progDesc, showDefault,
-                                         strOption, value, (<**>))
+                                         strOption, switch, value, (<**>))
 import           System.Log.Logger      (Priority (DEBUG), debugM,
                                          rootLoggerName, setLevel,
                                          updateGlobalLogger)
@@ -21,9 +22,11 @@ import           Tesla
 import           TeslaDB
 
 data Options = Options {
-  optDBPath      :: String
-  , optMQTTURI   :: URI
-  , optMQTTTopic :: Text
+  optDBPath         :: String
+  , optMQTTURI      :: URI
+  , optMQTTTopic    :: Text
+  , optSessionTime  :: Word32
+  , optCleanSession :: Bool
   }
 
 options :: Parser Options
@@ -31,6 +34,8 @@ options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
+  <*> option auto (long "session-expiry" <> showDefault <> value 3600 <> help "Session expiration")
+  <*> switch (long "clean-session" <> help "Clean the MQTT session")
 
 run :: Options -> IO ()
 run Options{..} = do
@@ -50,7 +55,7 @@ run Options{..} = do
                                   _protocol=Protocol50,
                                   _msgCB=SimpleCallback (sink db),
                                   _connProps=[PropReceiveMaximum 65535,
-                                              PropSessionExpiryInterval 3600,
+                                              PropSessionExpiryInterval optSessionTime,
                                               PropTopicAliasMaximum 10,
                                               PropRequestResponseInformation 1,
                                               PropRequestProblemInformation 1]}
