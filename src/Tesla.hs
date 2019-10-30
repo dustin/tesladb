@@ -5,7 +5,7 @@
 module Tesla
     ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
       fromToken, vehicleData, VehicleData,
-      isUserPresent, isCharging
+      isUserPresent, isCharging, teslaTS
     ) where
 
 
@@ -20,7 +20,10 @@ import qualified Data.ByteString.Lazy   as BL
 import           Data.Map.Strict        (Map)
 import qualified Data.Map.Strict        as Map
 import           Data.Maybe             (fromJust, fromMaybe)
+import           Data.Ratio
 import           Data.Text              (Text)
+import           Data.Time.Clock        (UTCTime)
+import           Data.Time.Clock.POSIX  (posixSecondsToUTCTime)
 import           Generics.Deriving.Base (Generic)
 import           Network.Wreq           (FormParam (..), Options, Response,
                                          asJSON, defaults, getWith, header,
@@ -115,3 +118,8 @@ isCharging :: VehicleData -> Bool
 isCharging b = let (Just d) = decode b :: Maybe Value
                    mi = d ^? key "charge_state" . key "charger_power" . _Integer in
                  fromMaybe 0 mi > 0
+
+teslaTS :: VehicleData -> UTCTime
+teslaTS b = let (Just d) = decode b :: Maybe Value
+                mts = d ^? key "vehicle_state" . key "timestamp" . _Integer in
+              posixSecondsToUTCTime . fromRational $ (fromMaybe 0 mts) % 1000

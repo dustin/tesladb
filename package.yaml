@@ -37,6 +37,7 @@ dependencies:
 - async
 - stm
 - net-mqtt
+- time
 
 library:
   source-dirs: src

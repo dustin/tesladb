@@ -4,6 +4,9 @@ import           Test.Tasty
 import           Test.Tasty.HUnit
 import           Test.Tasty.QuickCheck as QC
 
+import           Data.Ratio
+import           Data.Time.Clock       (UTCTime)
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 
 import           Tesla
 
@@ -16,10 +19,14 @@ testIsUserPresent = assertBool "expected user not present" $ isUserPresent sampl
 testIsCharging :: Assertion
 testIsCharging = assertBool "expected charging" $ isCharging sampleVehicleData
 
+testTimestamp :: Assertion
+testTimestamp = assertEqual "timestamp" (posixSecondsToUTCTime . fromRational $ 1569718275489 % 1000) (teslaTS sampleVehicleData)
+
 tests :: [TestTree]
 tests = [
   testCase "is user present" testIsUserPresent,
-  testCase "charging" testIsCharging
+  testCase "charging" testIsCharging,
+  testCase "timestamp" testTimestamp
   ]
 
 main :: IO ()

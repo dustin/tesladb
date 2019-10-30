@@ -31,6 +31,7 @@ import           System.Timeout           (timeout)
 
 import           AuthDB
 import           Tesla
+import           TeslaDB
 
 data Options = Options {
   optDBPath      :: String
@@ -52,9 +53,6 @@ options = Options
 
 createStatement :: Query
 createStatement = "create table if not exists data (ts timestamp, data blob)"
-
-insertStatement :: Query
-insertStatement = "insert into data(ts, data) values(current_timestamp, ?)"
 
 type Sink = Options -> TChan VehicleData -> IO ()
 
@@ -88,9 +86,7 @@ dbSink Options{..} ch = withConnection optDBPath storeThings
       execute_ db "pragma auto_vacuum = incremental"
       execute_ db createStatement
 
-      forever $ do
-        vdata <- atomically $ readTChan ch
-        execute db insertStatement (Only vdata)
+      forever $ atomically (readTChan ch) >>= insertVData db
 
 data DisconnectedException = DisconnectedException deriving Show
 
