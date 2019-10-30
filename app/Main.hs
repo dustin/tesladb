@@ -51,9 +51,6 @@ options = Options
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
 
-createStatement :: Query
-createStatement = "create table if not exists data (ts timestamp, data blob)"
-
 type Sink = Options -> TChan VehicleData -> IO ()
 
 excLoop :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
@@ -83,8 +80,7 @@ dbSink Options{..} ch = withConnection optDBPath storeThings
 
   where
     storeThings db = do
-      execute_ db "pragma auto_vacuum = incremental"
-      execute_ db createStatement
+      dbInit db
 
       forever $ atomically (readTChan ch) >>= insertVData db
 

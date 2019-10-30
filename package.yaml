@@ -68,6 +68,17 @@ executables:
     dependencies:
     - tesladb
 
+  teslacatcher:
+    main:                Main.hs
+    source-dirs:         app/catcher
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -Wall
+    dependencies:
+    - tesladb
+
 tests:
   tesladb-test:
     main:                Spec.hs
