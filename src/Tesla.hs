@@ -109,17 +109,18 @@ vehicleData ai vid = do
   pure . fromJust . inner $ r ^. responseBody
     where inner = BL.stripPrefix "{\"response\":" <=< BL.stripSuffix "}"
 
+maybeVal :: VehicleData -> Maybe Value
+maybeVal = decode
+
 isUserPresent :: VehicleData -> Bool
-isUserPresent b = let (Just d) = decode b :: Maybe Value
-                      mb = d ^? key "vehicle_state" . key "is_user_present" . _Bool in
+isUserPresent b = let mb = maybeVal b ^? _Just . key "vehicle_state" . key "is_user_present" . _Bool in
                     fromMaybe False mb
 
 isCharging :: VehicleData -> Bool
-isCharging b = let (Just d) = decode b :: Maybe Value
-                   mi = d ^? key "charge_state" . key "charger_power" . _Integer in
+isCharging b = let mi = maybeVal b ^? _Just . key "charge_state" . key "charger_power" . _Integer in
                  fromMaybe 0 mi > 0
 
 teslaTS :: VehicleData -> UTCTime
-teslaTS b = let (Just d) = decode b :: Maybe Value
-                mts = d ^? key "vehicle_state" . key "timestamp" . _Integer in
-              posixSecondsToUTCTime . fromRational $ (fromMaybe 0 mts) % 1000
+teslaTS b = fromJust $ pt <$> mv
+  where mv = maybeVal b ^? _Just . key "vehicle_state" . key "timestamp" . _Integer
+        pt x = posixSecondsToUTCTime . fromRational $ x % 1000
