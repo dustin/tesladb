@@ -12,7 +12,7 @@ import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
                                            retry, writeTChan)
 import           Control.Exception        (Exception, SomeException (..),
                                            bracket, catch, throw)
-import           Control.Monad            (forever, when)
+import           Control.Monad            (forever, unless)
 import qualified Data.Map.Strict          as Map
 import           Data.Maybe               (fromJust)
 import           Data.Text                (Text, unpack)
@@ -66,13 +66,13 @@ watchdogSink :: Sink
 watchdogSink o ch = do
   tov <- registerDelay (3*600000000)
   again <- atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
-  when (not again) $ die "Watchdog timeout"
+  unless again $ die "Watchdog timeout"
   watchdogSink o ch
 
     where
       checkTimeout v = do
         v' <- readTVar v
-        when (not v') retry
+        unless v' retry
         pure False
 
 dbSink :: Sink
@@ -109,7 +109,7 @@ mqttSink Options{..} ch = withMQTT store
     store mc = forever $ do
       vdata <- atomically $ do
         connd <- isConnectedSTM mc
-        when (not connd) $ throw DisconnectedException
+        unless connd $ throw DisconnectedException
         readTChan ch
       debugM rootLoggerName "Delivering vdata via MQTT"
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
