@@ -5,6 +5,8 @@ module Main where
 
 import           Data.Maybe             (fromJust)
 import           Data.Text              (Text)
+import           Data.Time.Format       (defaultTimeLocale, formatTime)
+import           Data.Time.LocalTime    (getCurrentTimeZone, utcToLocalTime)
 import           Data.Word              (Word32)
 import           Database.SQLite.Simple hiding (bind, close)
 import           Network.MQTT.Client
@@ -45,7 +47,9 @@ run Options{..} = do
 
   where
     sink db _ _ m _ = do
-      debugM rootLoggerName $ mconcat ["Received data ", (show . teslaTS) m]
+      tz <- getCurrentTimeZone
+      let lt = utcToLocalTime tz . teslaTS $ m
+      debugM rootLoggerName $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
       insertVData db m
 
     storeThings db = do
