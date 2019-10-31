@@ -141,7 +141,7 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "days" res _ = do
           infoM rootLoggerName $ mconcat ["Days call responding to ", show res]
           days <- listDays db
-          publishq mc res (encode days) False QoS2 [PropContentType "application/json"]
+          publishq mc res (encode . Map.fromList $ days) False QoS2 [PropContentType "application/json"]
 
         call "day" res d = do
           infoM rootLoggerName $ mconcat ["Day call for ", show d, " responding to ", show res]
