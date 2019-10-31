@@ -17,8 +17,8 @@ dbInit db = do
 insertVData :: Connection -> VehicleData -> IO ()
 insertVData db vdata = execute db "insert into data(ts, data) values(?, ?)" (teslaTS vdata, vdata)
 
-listDays :: Connection -> IO [String]
-listDays db = fmap fst <$> (query_ db "select date(ts) as day, count(*) from data group by day" :: IO [(String, Int)])
+listDays :: Connection -> IO [(String,Int)]
+listDays db = query_ db "select date(ts) as day, count(*) from data group by day"
 
 listDay :: Connection -> String -> IO [UTCTime]
 listDay db d = fmap fromOnly <$> query db "select ts from data where date(ts) = ?" (Only d)
