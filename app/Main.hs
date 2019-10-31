@@ -4,30 +4,35 @@
 
 module Main where
 
-import           Control.Concurrent       (threadDelay)
-import           Control.Concurrent.Async (mapConcurrently_, race_)
-import           Control.Concurrent.STM   (TChan, atomically, dupTChan,
-                                           newBroadcastTChanIO, orElse,
-                                           readTChan, readTVar, registerDelay,
-                                           retry, writeTChan)
-import           Control.Exception        (Exception, SomeException (..),
-                                           bracket, catch, throw)
-import           Control.Monad            (forever, unless)
-import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (fromJust)
-import           Data.Text                (Text, unpack)
-import           Database.SQLite.Simple   hiding (bind, close)
+import           Control.Concurrent         (threadDelay)
+import           Control.Concurrent.Async   (mapConcurrently_, race_)
+import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
+                                             newBroadcastTChanIO, orElse,
+                                             readTChan, readTVar, registerDelay,
+                                             retry, writeTChan)
+import           Control.Exception          (Exception, SomeException (..),
+                                             bracket, catch, throw)
+import           Control.Monad              (forever, guard, unless)
+import           Data.Aeson                 (decode, encode)
+import qualified Data.ByteString.Lazy       as BL
+import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Map.Strict            as Map
+import           Data.Maybe                 (fromJust, isJust)
+import           Data.Text                  (Text, breakOnEnd, unpack)
+import qualified Data.Text.Encoding         as TE
+import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
 import           Network.URI
-import           Options.Applicative      (Parser, execParser, fullDesc, help,
-                                           helper, info, long, maybeReader,
-                                           option, progDesc, short, showDefault,
-                                           strOption, switch, value, (<**>))
-import           System.Exit              (die)
-import           System.Log.Logger        (Priority (DEBUG, INFO), debugM,
-                                           errorM, infoM, rootLoggerName,
-                                           setLevel, updateGlobalLogger)
-import           System.Timeout           (timeout)
+import           Options.Applicative        (Parser, execParser, fullDesc, help,
+                                             helper, info, long, maybeReader,
+                                             option, progDesc, short,
+                                             showDefault, strOption, switch,
+                                             value, (<**>))
+import           System.Exit                (die)
+import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
+                                             errorM, infoM, rootLoggerName,
+                                             setLevel, updateGlobalLogger)
+import           System.Timeout             (timeout)
 
 import           AuthDB
 import           Tesla
@@ -40,6 +45,7 @@ data Options = Options {
   , optVerbose   :: Bool
   , optMQTTURI   :: URI
   , optMQTTTopic :: Text
+  , optInTopic   :: Text
   }
 
 options :: Parser Options
@@ -50,6 +56,7 @@ options = Options
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
+  <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
 
 type Sink = Options -> TChan VehicleData -> IO ()
 
@@ -88,17 +95,23 @@ data DisconnectedException = DisconnectedException deriving Show
 
 instance Exception DisconnectedException
 
+blToText :: BL.ByteString -> Text
+blToText = TE.decodeUtf8 . BL.toStrict
+
 mqttSink :: Sink
-mqttSink Options{..} ch = withMQTT store
+mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
   where
-    withMQTT = bracket connect disco
+    withMQTT db = bracket (connect db) disco
 
-    connect = do
+    connect db = do
       infoM rootLoggerName $ mconcat ["Connecting to ", show optMQTTURI]
-      mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
+      mc <- connectURI mqttConfig{_protocol=Protocol50,
+                                  _msgCB=SimpleCallback (tdbAPI db)} optMQTTURI
       props <- svrProps mc
       infoM rootLoggerName $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
+      subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
+      infoM rootLoggerName $ mconcat ["MQTT sub response: ", show subr]
       pure mc
 
     disco c = do
@@ -115,6 +128,34 @@ mqttSink Options{..} ch = withMQTT store
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
       debugM rootLoggerName "Delivered vdata via MQTT"
+
+    tdbAPI db mc t m props = call ((snd . breakOnEnd "/") t) ret m
+
+      where
+        ret = blToText . foldr f "" $ props
+          where f (PropResponseTopic r) _ = r
+                f _                     o = o
+
+        call p "" _ = infoM rootLoggerName $ mconcat ["request to ", show p, " with no response topic"]
+
+        call "days" res _ = do
+          infoM rootLoggerName $ mconcat ["Days call responding to ", show res]
+          days <- listDays db
+          publishq mc res (encode days) False QoS2 [PropContentType "application/json"]
+
+        call "day" res d = do
+          infoM rootLoggerName $ mconcat ["Day call for ", show d, " responding to ", show res]
+          days <- listDay db (BC.unpack d)
+          publishq mc res (encode days) False QoS2 [PropContentType "application/json"]
+
+        call "fetch" res tss = do
+          infoM rootLoggerName $ mconcat ["Fetch call for ", show tss, " responding to ", show res]
+          let mts = decode ("\"" <> tss <> "\"")
+          guard $ isJust mts
+          vdata <- fetchDatum db (fromJust mts)
+          publishq mc res vdata False QoS2 [PropContentType "application/json"]
+
+        call x _ _ = infoM rootLoggerName $ mconcat ["Call to invalid path: ", show x]
 
 gather :: Options -> TChan  VehicleData -> IO ()
 gather Options{..} ch = do
