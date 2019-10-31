@@ -1,26 +1,30 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module TeslaDB (insertVData, dbInit) where
+module TeslaDB (insertVData, dbInit, listDays, listDay, fetchDatum) where
 
+import           Control.Monad          (guard)
+import           Data.Time.Clock        (UTCTime)
 import           Database.SQLite.Simple hiding (bind, close)
 
 import           Tesla                  (VehicleData, teslaTS)
 
-createStatement :: Query
-createStatement = "create table if not exists data (ts timestamp, data blob)"
-
-createIndexStatement :: Query
-createIndexStatement = "create unique index if not exists data_ts on data(ts)"
-
 dbInit :: Connection -> IO ()
 dbInit db = do
   execute_ db "pragma auto_vacuum = incremental"
-  execute_ db createStatement
-  execute_ db createIndexStatement
-
-insertStatement :: Query
-insertStatement = "insert into data(ts, data) values(?, ?)"
+  execute_ db "create table if not exists data (ts timestamp, data blob)"
+  execute_ db "create unique index if not exists data_ts on data(ts)"
 
 insertVData :: Connection -> VehicleData -> IO ()
-insertVData db vdata = execute db insertStatement (teslaTS vdata, vdata)
+insertVData db vdata = execute db "insert into data(ts, data) values(?, ?)" (teslaTS vdata, vdata)
 
+listDays :: Connection -> IO [String]
+listDays db = fmap fst <$> (query_ db "select date(ts) as day, count(*) from data group by day" :: IO [(String, Int)])
+
+listDay :: Connection -> String -> IO [UTCTime]
+listDay db d = fmap fromOnly <$> query db "select ts from data where date(ts) = ?" (Only d)
+
+fetchDatum :: Connection -> UTCTime -> IO VehicleData
+fetchDatum db t = do
+  rows <- query db "select data from data where ts = ?" (Only t)
+  guard $ length rows == 1
+  pure . fromOnly . head $ rows
