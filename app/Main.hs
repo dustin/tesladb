@@ -136,24 +136,30 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
           where f (PropResponseTopic r) _ = r
                 f _                     o = o
 
+        rprops = filter f props
+          where
+            f (PropCorrelationData{}) = True
+            f (PropUserProperty{})    = True
+            f _                       = False
+
         call p "" _ = infoM rootLoggerName $ mconcat ["request to ", show p, " with no response topic"]
 
         call "days" res _ = do
           infoM rootLoggerName $ mconcat ["Days call responding to ", show res]
           days <- listDays db
-          publishq mc res (encode . Map.fromList $ days) False QoS2 [PropContentType "application/json"]
+          publishq mc res (encode . Map.fromList $ days) False QoS2 ([PropContentType "application/json"] <> rprops)
 
         call "day" res d = do
           infoM rootLoggerName $ mconcat ["Day call for ", show d, " responding to ", show res]
           days <- listDay db (BC.unpack d)
-          publishq mc res (encode days) False QoS2 [PropContentType "application/json"]
+          publishq mc res (encode days) False QoS2 ([PropContentType "application/json"] <> rprops)
 
         call "fetch" res tss = do
           infoM rootLoggerName $ mconcat ["Fetch call for ", show tss, " responding to ", show res]
           let mts = decode ("\"" <> tss <> "\"")
           guard $ isJust mts
           vdata <- fetchDatum db (fromJust mts)
-          publishq mc res vdata False QoS2 [PropContentType "application/json"]
+          publishq mc res vdata False QoS2 ([PropContentType "application/json"] <> rprops)
 
         call x _ _ = infoM rootLoggerName $ mconcat ["Call to invalid path: ", show x]
 
