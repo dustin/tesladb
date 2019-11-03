@@ -5,7 +5,7 @@
 module Tesla
     ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
       fromToken, vehicleData, VehicleData,
-      isUserPresent, isCharging, teslaTS
+      isUserPresent, isCharging, teslaTS, maybeTeslaTS
     ) where
 
 
@@ -120,7 +120,10 @@ isCharging :: VehicleData -> Bool
 isCharging b = let mi = maybeVal b ^? _Just . key "charge_state" . key "charger_power" . _Integer in
                  fromMaybe 0 mi > 0
 
-teslaTS :: VehicleData -> UTCTime
-teslaTS b = fromJust $ pt <$> mv
+maybeTeslaTS :: VehicleData -> Maybe UTCTime
+maybeTeslaTS b = pt <$> mv
   where mv = maybeVal b ^? _Just . key "vehicle_state" . key "timestamp" . _Integer
         pt x = posixSecondsToUTCTime . fromRational $ x % 1000
+
+teslaTS :: VehicleData -> UTCTime
+teslaTS b = maybe (error . show $ b) id . maybeTeslaTS $ b
