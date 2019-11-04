@@ -14,7 +14,7 @@ import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import qualified Data.Set                   as Set
-import           Data.Text                  (Text)
+import           Data.Text                  (Text, dropWhileEnd)
 import qualified Data.Text.Encoding         as TE
 import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
@@ -99,17 +99,18 @@ mqttRPC mc topic req = do
                     PropResponseTopic theTopic]
                   atomically $ readTChan r
 
-backfill :: Connection -> MQTTClient -> IO ()
-backfill db mc = do
-  Just rdays <- decode <$> mqttRPC mc "tesla/x/in/days" "" :: IO (Maybe (Map String Int))
+backfill :: Connection -> MQTTClient -> Topic -> IO ()
+backfill db mc dtopic = do
+  Just rdays <- decode <$> mqttRPC mc (topic "days") "" :: IO (Maybe (Map String Int))
   ldays <- Map.fromList <$> listDays db
   let dayDiff = Map.keys $ Map.differenceWith (\a _ -> Just a) rdays ldays
 
   mapM_ doDay (reverse dayDiff)
 
     where
+      topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
-        Just rday <- decode <$> mqttRPC mc "tesla/x/in/day" (BC.pack d) :: IO (Maybe [UTCTime])
+        Just rday <- decode <$> mqttRPC mc (topic "day") (BC.pack d) :: IO (Maybe [UTCTime])
         lday <- Set.fromList <$> listDay db d
         let rdaySet = Set.fromList rday
             diff = Set.difference rdaySet lday
@@ -119,7 +120,7 @@ backfill db mc = do
       doOne ts = do
         let (Just k) = (inner . encode) ts
         debugM rootLoggerName $ mconcat ["Fetching remote data from ", show ts]
-        vd <- mqttRPC mc "tesla/x/in/fetch" k
+        vd <- mqttRPC mc (topic "fetch") k
         insertVData db vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
@@ -144,7 +145,7 @@ run opts@Options{..} = do
         subr <- subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2, _retainHandling=SendOnSubscribeNew})] mempty
         debugM rootLoggerName $ mconcat ["Sub response: ", show subr]
 
-        when optBackfill $ backfill db mc
+        when optBackfill $ backfill db mc optMQTTTopic
 
         waitForClient mc
 
