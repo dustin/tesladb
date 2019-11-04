@@ -101,15 +101,18 @@ mqttRPC mc topic req = do
 
 backfill :: Connection -> MQTTClient -> Topic -> IO ()
 backfill db mc dtopic = do
+  infoM rootLoggerName $ "Beginning backfill"
   Just rdays <- decode <$> mqttRPC mc (topic "days") "" :: IO (Maybe (Map String Int))
   ldays <- Map.fromList <$> listDays db
   let dayDiff = Map.keys $ Map.differenceWith (\a _ -> Just a) rdays ldays
 
-  mapM_ doDay (reverse dayDiff)
+  mapM_ doDay dayDiff
+  infoM rootLoggerName $ "Backfill complete"
 
     where
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
+        infoM rootLoggerName $ mconcat ["Backfilling ", d]
         Just rday <- decode <$> mqttRPC mc (topic "day") (BC.pack d) :: IO (Maybe [UTCTime])
         lday <- Set.fromList <$> listDay db d
         let rdaySet = Set.fromList rday
