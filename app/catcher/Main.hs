@@ -104,7 +104,7 @@ backfill db mc dtopic = do
   infoM rootLoggerName $ "Beginning backfill"
   Just rdays <- decode <$> mqttRPC mc (topic "days") "" :: IO (Maybe (Map String Int))
   ldays <- Map.fromList <$> listDays db
-  let dayDiff = Map.keys $ Map.differenceWith (\a _ -> Just a) rdays ldays
+  let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
   mapM_ doDay dayDiff
   infoM rootLoggerName $ "Backfill complete"
