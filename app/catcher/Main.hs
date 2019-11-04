@@ -30,8 +30,8 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              maybeReader, option, progDesc,
                                              showDefault, strOption, switch,
                                              value, (<**>))
-import           System.Log.Logger          (Priority (DEBUG), debugM,
-                                             rootLoggerName, setLevel,
+import           System.Log.Logger          (Priority (DEBUG), debugM, errorM,
+                                             infoM, rootLoggerName, setLevel,
                                              updateGlobalLogger)
 import           System.Random              (randomIO)
 
@@ -136,7 +136,8 @@ run opts@Options{..} = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
       debugM rootLoggerName $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
-      insertVData db m
+      E.catch (insertVData db m) (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show lt, ": ",
+                                                                           show (ex :: SQLError)])
 
     storeThings db = do
       dbInit db
