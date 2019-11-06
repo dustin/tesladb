@@ -99,6 +99,11 @@ mqttRPC mc topic req = do
                     PropResponseTopic theTopic]
                   atomically $ readTChan r
 
+tryInsert :: Connection -> VehicleData -> IO ()
+tryInsert db vd = E.catch (insertVData db vd)
+                  (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
+                                                           show (ex :: SQLError)])
+
 backfill :: Connection -> MQTTClient -> Topic -> IO ()
 backfill db mc dtopic = do
   infoM rootLoggerName $ "Beginning backfill"
@@ -124,7 +129,7 @@ backfill db mc dtopic = do
         let (Just k) = (inner . encode) ts
         debugM rootLoggerName $ mconcat ["Fetching remote data from ", show ts]
         vd <- mqttRPC mc (topic "fetch") k
-        insertVData db vd
+        tryInsert db vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
@@ -139,8 +144,7 @@ run opts@Options{..} = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
       debugM rootLoggerName $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
-      E.catch (insertVData db m) (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show lt, ": ",
-                                                                           show (ex :: SQLError)])
+      tryInsert db m
 
     storeThings db = do
       dbInit db
