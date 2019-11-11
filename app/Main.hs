@@ -5,13 +5,15 @@
 module Main where
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (mapConcurrently_, race_)
+import           Control.Concurrent.Async   (AsyncCancelled (..),
+                                             mapConcurrently_, race_)
 import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
                                              newBroadcastTChanIO, orElse,
                                              readTChan, readTVar, registerDelay,
                                              retry, writeTChan)
-import           Control.Exception          (Exception, SomeException (..),
-                                             bracket, catch, throw)
+import           Control.Exception          (Exception, Handler (..),
+                                             SomeException (..), bracket,
+                                             catches, throw, throwIO)
 import           Control.Monad              (forever, guard, unless)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
@@ -28,7 +30,6 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              option, progDesc, short,
                                              showDefault, strOption, switch,
                                              value, (<**>))
-import           System.Exit                (die)
 import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
                                              errorM, infoM, rootLoggerName,
                                              setLevel, updateGlobalLogger)
@@ -60,12 +61,20 @@ options = Options
 
 type Sink = Options -> TChan VehicleData -> IO ()
 
+newtype DeathException = Die String deriving(Eq, Show)
+
+instance Exception DeathException
+
 excLoop :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
-excLoop n s opts ch = forever $ catch (s opts ch) handler
+excLoop n s opts ch = forever $ catches (s opts ch) [Handler cancelHandler,
+                                                     Handler otherHandler]
 
   where
-    handler :: SomeException -> IO ()
-    handler e = do
+    cancelHandler :: AsyncCancelled -> IO ()
+    cancelHandler e = errorM rootLoggerName "AsyncCanceled from mqtt handler" >> throwIO e
+
+    otherHandler :: SomeException -> IO ()
+    otherHandler e = do
       errorM rootLoggerName $ mconcat ["Caught exception in handler: ", n, " - ", show e, " retrying shortly"]
       threadDelay 5000000
 
@@ -98,6 +107,9 @@ instance Exception DisconnectedException
 
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
+
+die :: String -> IO ()
+die = throwIO . Die
 
 mqttSink :: Sink
 mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
