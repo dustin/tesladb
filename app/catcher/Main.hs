@@ -3,8 +3,6 @@
 
 module Main where
 
-import           Control.Concurrent.STM     (atomically, newTChanIO, readTChan,
-                                             writeTChan)
 import qualified Control.Exception          as E
 import           Control.Monad              (when, (<=<))
 import           Data.Aeson                 (decode, encode)
@@ -19,10 +17,10 @@ import qualified Data.Text.Encoding         as TE
 import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
 import           Data.Time.LocalTime        (getCurrentTimeZone, utcToLocalTime)
-import qualified Data.UUID                  as UUID
 import           Data.Word                  (Word32)
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
+import qualified Network.MQTT.RPC           as MQTTRPC
 import           Network.MQTT.Types         (RetainHandling (..))
 import           Network.URI
 import           Options.Applicative        (Parser, auto, execParser, fullDesc,
@@ -33,7 +31,6 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
 import           System.Log.Logger          (Priority (DEBUG), debugM, errorM,
                                              infoM, rootLoggerName, setLevel,
                                              updateGlobalLogger)
-import           System.Random              (randomIO)
 
 import           Tesla
 import           TeslaDB
@@ -78,27 +75,6 @@ withMQTT Options{..} cb = E.bracket conn normalDisconnect
       debugM rootLoggerName $ mconcat ["MQTT connected: ", show props]
       pure mc
 
-mqttRPC :: MQTTClient -> Topic -> BL.ByteString -> IO BL.ByteString
-mqttRPC mc topic req = do
-  r <- newTChanIO
-  corr <- BL.fromStrict . UUID.toASCIIBytes <$> randomIO
-  subid <- BL.fromStrict . ("$rpc/" <>) . UUID.toASCIIBytes <$> randomIO
-  go corr subid r
-
-  where go theID theTopic r = E.bracket reg unreg call
-          where reg = do
-                  atomically $ registerCorrelated mc theID (SimpleCallback cb)
-                  subscribe mc [(blToText theTopic, subOptions)] mempty
-                unreg _ = do
-                  atomically $ unregisterCorrelated mc theID
-                  unsubscribe mc [blToText theTopic] mempty
-                cb _ _ m _ = atomically $ writeTChan r m
-                call _ = do
-                  publishq mc topic req False QoS2 [
-                    PropCorrelationData theID,
-                    PropResponseTopic theTopic]
-                  atomically $ readTChan r
-
 tryInsert :: Connection -> VehicleData -> IO ()
 tryInsert db vd = E.catch (insertVData db vd)
                   (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
@@ -107,7 +83,7 @@ tryInsert db vd = E.catch (insertVData db vd)
 backfill :: Connection -> MQTTClient -> Topic -> IO ()
 backfill db mc dtopic = do
   infoM rootLoggerName $ "Beginning backfill"
-  Just rdays <- decode <$> mqttRPC mc (topic "days") "" :: IO (Maybe (Map String Int))
+  Just rdays <- decode <$> MQTTRPC.call mc (topic "days") "" :: IO (Maybe (Map String Int))
   ldays <- Map.fromList <$> listDays db
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
@@ -118,7 +94,7 @@ backfill db mc dtopic = do
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
         infoM rootLoggerName $ mconcat ["Backfilling ", d]
-        Just rday <- decode <$> mqttRPC mc (topic "day") (BC.pack d) :: IO (Maybe [UTCTime])
+        Just rday <- decode <$> MQTTRPC.call mc (topic "day") (BC.pack d) :: IO (Maybe [UTCTime])
         lday <- Set.fromList <$> listDay db d
         let rdaySet = Set.fromList rday
             diff = Set.difference rdaySet lday
@@ -128,7 +104,7 @@ backfill db mc dtopic = do
       doOne ts = do
         let (Just k) = (inner . encode) ts
         debugM rootLoggerName $ mconcat ["Fetching remote data from ", show ts]
-        vd <- mqttRPC mc (topic "fetch") k
+        vd <- MQTTRPC.call mc (topic "fetch") k
         tryInsert db vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
