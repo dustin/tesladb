@@ -73,6 +73,7 @@ watchdogSink :: Sink
 watchdogSink o ch = do
   tov <- registerDelay (3*600000000)
   again <- atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
+  debugM rootLoggerName $ "Watchdog returned " <> show again
   unless again $ die "Watchdog timeout"
   watchdogSink o ch
 
