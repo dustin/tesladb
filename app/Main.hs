@@ -143,6 +143,8 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
             f (PropUserProperty{})    = True
             f _                       = False
 
+        call "quit" _ _ = errorM rootLoggerName "quit requested via MQTT" >> die "quit via MQTT"
+
         call p "" _ = infoM rootLoggerName $ mconcat ["request to ", show p, " with no response topic"]
 
         call "days" res _ = do
