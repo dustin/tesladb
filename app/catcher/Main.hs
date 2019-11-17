@@ -29,11 +29,11 @@ import           Network.URI
 import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              help, helper, info, long,
                                              maybeReader, option, progDesc,
-                                             showDefault, strOption, switch,
-                                             value, (<**>))
-import           System.Log.Logger          (Priority (DEBUG), debugM, errorM,
-                                             infoM, rootLoggerName, setLevel,
-                                             updateGlobalLogger)
+                                             short, showDefault, strOption,
+                                             switch, value, (<**>))
+import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
+                                             errorM, infoM, rootLoggerName,
+                                             setLevel, updateGlobalLogger)
 
 import           Tesla
 import           TeslaDB
@@ -45,6 +45,7 @@ data Options = Options {
   , optNoBackfill   :: Bool
   , optSessionTime  :: Word32
   , optCleanSession :: Bool
+  , optVerbose      :: Bool
   }
 
 blToText :: BL.ByteString -> Text
@@ -58,6 +59,7 @@ options = Options
   <*> switch (long "disable-backfill" <> help "Disable backfill via MQTT")
   <*> option auto (long "session-expiry" <> showDefault <> value 3600 <> help "Session expiration")
   <*> switch (long "clean-session" <> help "Clean the MQTT session")
+  <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
 
 type Callback = MQTTClient -> Topic -> BL.ByteString -> [Property] -> IO ()
 
@@ -103,8 +105,12 @@ backfill db mc dtopic = do
       doDay d = do
         infoM rootLoggerName $ mconcat ["Backfilling ", d]
         (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay db d)
+        let missing = Set.difference rday lday
+            extra = Set.difference lday rday
+        debugM rootLoggerName $ mconcat ["missing: ", show missing]
+        debugM rootLoggerName $ mconcat ["extra: ", show extra]
 
-        mapConcurrently_ doOne (Set.difference rday lday)
+        mapConcurrently_ doOne missing
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
@@ -116,7 +122,7 @@ backfill db mc dtopic = do
 
 run :: Options -> IO ()
 run opts@Options{..} = do
-  updateGlobalLogger rootLoggerName (setLevel DEBUG)
+  updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
 
   withConnection optDBPath storeThings
 
