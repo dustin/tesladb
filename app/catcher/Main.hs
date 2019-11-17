@@ -5,7 +5,7 @@ module Main where
 
 import           Control.Concurrent.Async   (concurrently, mapConcurrently_)
 import qualified Control.Exception          as E
-import           Control.Monad              (when, (<=<))
+import           Control.Monad              (unless, (<=<))
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -42,7 +42,7 @@ data Options = Options {
   optDBPath         :: String
   , optMQTTURI      :: URI
   , optMQTTTopic    :: Text
-  , optBackfill     :: Bool
+  , optNoBackfill   :: Bool
   , optSessionTime  :: Word32
   , optCleanSession :: Bool
   }
@@ -55,7 +55,7 @@ options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
-  <*> switch (long "backfill" <> help "Perform a backfill via MQTT")
+  <*> switch (long "disable-backfill" <> help "Disable backfill via MQTT")
   <*> option auto (long "session-expiry" <> showDefault <> value 3600 <> help "Session expiration")
   <*> switch (long "clean-session" <> help "Clean the MQTT session")
 
@@ -134,7 +134,7 @@ run opts@Options{..} = do
         subr <- subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2, _retainHandling=SendOnSubscribeNew})] mempty
         debugM rootLoggerName $ mconcat ["Sub response: ", show subr]
 
-        when optBackfill $ backfill db mc optMQTTTopic
+        unless optNoBackfill $ backfill db mc optMQTTTopic
 
         waitForClient mc
 
