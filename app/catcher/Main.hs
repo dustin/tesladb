@@ -8,9 +8,11 @@ import           Control.Monad              (when, (<=<))
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import           Data.Foldable              (traverse_)
 import           Data.Map.Strict            (Map)
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
+import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
 import           Data.Text                  (Text, dropWhileEnd)
 import qualified Data.Text.Encoding         as TE
@@ -87,19 +89,17 @@ backfill db mc dtopic = do
   ldays <- Map.fromList <$> listDays db
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
-  mapM_ doDay dayDiff
+  traverse_ doDay dayDiff
   infoM rootLoggerName $ "Backfill complete"
 
     where
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
         infoM rootLoggerName $ mconcat ["Backfilling ", d]
-        Just rday <- decode <$> MQTTRPC.call mc (topic "day") (BC.pack d) :: IO (Maybe [UTCTime])
+        Just rday <- decode <$> MQTTRPC.call mc (topic "day") (BC.pack d) :: IO (Maybe (Set UTCTime))
         lday <- Set.fromList <$> listDay db d
-        let rdaySet = Set.fromList rday
-            diff = Set.difference rdaySet lday
 
-        mapM_ doOne $ Set.toList diff
+        traverse_ doOne (Set.difference rday lday)
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
