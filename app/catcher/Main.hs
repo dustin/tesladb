@@ -3,6 +3,7 @@
 
 module Main where
 
+import           Control.Concurrent.Async   (concurrently, mapConcurrently_)
 import qualified Control.Exception          as E
 import           Control.Monad              (when, (<=<))
 import           Data.Aeson                 (decode, encode)
@@ -85,21 +86,25 @@ tryInsert db vd = E.catch (insertVData db vd)
 backfill :: Connection -> MQTTClient -> Topic -> IO ()
 backfill db mc dtopic = do
   infoM rootLoggerName $ "Beginning backfill"
-  Just rdays <- decode <$> MQTTRPC.call mc (topic "days") "" :: IO (Maybe (Map String Int))
-  ldays <- Map.fromList <$> listDays db
+  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> listDays db)
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
   traverse_ doDay dayDiff
   infoM rootLoggerName $ "Backfill complete"
 
     where
+      remoteDays :: IO (Maybe (Map String Int))
+      remoteDays = decode <$> MQTTRPC.call mc (topic "days") ""
+
+      remoteDay :: BL.ByteString -> IO (Maybe (Set (UTCTime)))
+      remoteDay d = decode <$> MQTTRPC.call mc (topic "day") d
+
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
         infoM rootLoggerName $ mconcat ["Backfilling ", d]
-        Just rday <- decode <$> MQTTRPC.call mc (topic "day") (BC.pack d) :: IO (Maybe (Set UTCTime))
-        lday <- Set.fromList <$> listDay db d
+        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay db d)
 
-        traverse_ doOne (Set.difference rday lday)
+        mapConcurrently_ doOne (Set.difference rday lday)
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
