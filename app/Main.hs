@@ -5,8 +5,8 @@
 module Main where
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (AsyncCancelled (..),
-                                             mapConcurrently_, race_)
+import           Control.Concurrent.Async   (AsyncCancelled (..), async, race_,
+                                             waitAnyCancel)
 import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
                                              newBroadcastTChanIO, orElse,
                                              readTChan, readTVar, registerDelay,
@@ -14,7 +14,7 @@ import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
 import           Control.Exception          (Exception, Handler (..),
                                              SomeException (..), bracket,
                                              catches, throw, throwIO)
-import           Control.Monad              (forever, guard, unless)
+import           Control.Monad              (forever, guard, unless, void)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -209,13 +209,16 @@ gather Options{..} ch = do
     toke :: IO AuthInfo
     toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
+raceABunch_ :: [IO a] -> IO ()
+raceABunch_ is = traverse async is >>= void.waitAnyCancel
+
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = do
   updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
 
   tch <- newBroadcastTChanIO
   let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
-  race_ (gather opts tch) (mapConcurrently_ (\f -> f opts =<< d tch) sinks)
+  race_ (gather opts tch) (raceABunch_ ((\f -> f opts =<< d tch) <$> sinks))
 
   where d ch = atomically $ dupTChan ch
 
