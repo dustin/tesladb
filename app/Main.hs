@@ -20,7 +20,7 @@ import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, isJust)
-import           Data.Text                  (Text, breakOnEnd, unpack)
+import           Data.Text                  (Text, breakOnEnd, pack, unpack)
 import qualified Data.Text.Encoding         as TE
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
@@ -140,7 +140,14 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
       debugM rootLoggerName "Delivering vdata via MQTT"
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
+      unless (isUserPresent vdata) $ idiotCheck vdata
       debugM rootLoggerName "Delivered vdata via MQTT"
+
+        -- idiotCheck == verify state when user not present
+        where idiotCheck vdata = mapM_ reportOpen (openDoors vdata)
+              reportOpen d = publishq mc (optMQTTTopic <> "/door/ " <> pack (show d))
+                             "open" True QoS2 [PropMessageExpiryInterval 900]
+
 
     tdbAPI db mc t m props = call ((snd . breakOnEnd "/") t) ret m
 
