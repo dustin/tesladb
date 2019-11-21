@@ -80,6 +80,14 @@ withMQTT Options{..} cb = E.bracket conn normalDisconnect
       debugM rootLoggerName $ mconcat ["MQTT connected: ", show props]
       pure mc
 
+logData :: VehicleData -> IO ()
+logData vd = unless (up || null od) $ infoM rootLoggerName $ mconcat [
+  "User is not present, but the following doors are open at ", show ts, ": ", show od]
+  where
+    up = isUserPresent vd
+    od = openDoors vd
+    ts = teslaTS vd
+
 tryInsert :: Connection -> VehicleData -> IO ()
 tryInsert db vd = E.catch (insertVData db vd)
                   (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
@@ -116,6 +124,7 @@ backfill db mc dtopic = do
         let (Just k) = (inner . encode) ts
         debugM rootLoggerName $ mconcat ["Fetching remote data from ", show ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
+        logData vd
         tryInsert db vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
@@ -131,6 +140,7 @@ run opts@Options{..} = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
       debugM rootLoggerName $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
+      logData m
       tryInsert db m
 
     storeThings db = do
