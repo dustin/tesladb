@@ -36,7 +36,7 @@ import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
                                              setLevel, updateGlobalLogger)
 
 import           Tesla
-import           TeslaDB
+import           Tesla.DB
 
 data Options = Options {
   optDBPath         :: String

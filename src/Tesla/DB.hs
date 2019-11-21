@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module TeslaDB (insertVData, dbInit, listDays, listDay, fetchDatum) where
+module Tesla.DB (insertVData, dbInit, listDays, listDay, fetchDatum) where
 
 import           Control.Monad          (guard)
 import           Data.Time.Clock        (UTCTime)

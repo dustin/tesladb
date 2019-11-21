@@ -35,9 +35,9 @@ import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
                                              setLevel, updateGlobalLogger)
 import           System.Timeout             (timeout)
 
-import           AuthDB
 import           Tesla
-import           TeslaDB
+import           Tesla.AuthDB
+import           Tesla.DB
 
 data Options = Options {
   optDBPath      :: String

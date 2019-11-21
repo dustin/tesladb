@@ -12,7 +12,7 @@ import           Database.SQLite.Simple.Ok
 import           System.Environment               (getArgs)
 
 import           Tesla
-import           TeslaDB
+import           Tesla.DB
 
 newtype VD = VD { unVD :: VehicleData }
 

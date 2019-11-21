@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
-module AuthDB (updateAuth, loadAuth) where
+module Tesla.AuthDB (updateAuth, loadAuth) where
 
 import           Control.Monad          (guard)
 import           Database.SQLite.Simple hiding (bind, close)

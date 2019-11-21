@@ -3,7 +3,6 @@
 
 module Main where
 
-import           AuthDB
 import           Control.Exception   (bracket_)
 import           Options.Applicative (Parser, execParser, fullDesc, help,
                                       helper, info, long, progDesc, short,
@@ -11,6 +10,7 @@ import           Options.Applicative (Parser, execParser, fullDesc, help,
                                       (<**>))
 import           System.IO           (hFlush, hGetEcho, hSetEcho, stdin, stdout)
 import           Tesla
+import           Tesla.AuthDB
 
 data Options = Options {
   optDBPath    :: String
