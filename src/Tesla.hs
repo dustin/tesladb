@@ -5,7 +5,8 @@
 module Tesla
     ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
       fromToken, vehicleData, VehicleData,
-      isUserPresent, isCharging, teslaTS, maybeTeslaTS
+      isUserPresent, isCharging, teslaTS, maybeTeslaTS,
+      Door(..), OpenState(..), doors, openDoors
     ) where
 
 
@@ -127,3 +128,38 @@ maybeTeslaTS b = pt <$> mv
 
 teslaTS :: VehicleData -> UTCTime
 teslaTS b = maybe (error . show $ b) id . maybeTeslaTS $ b
+
+data Door = DriverFront
+          | DriverRear
+          | PassengerFront
+          | PassengerRear
+          | FrontTrunk
+          | RearTrunk
+          deriving (Show, Bounded, Enum, Eq)
+
+-- I only care about 0, but these are the observed values:
+-- 0 or 1 for df
+-- 0 or 2 for pf
+-- 0 or 4 for dr
+-- 0 or 8 for pr
+-- 0 or 16 for ft
+-- 0 or 32 for rt
+data OpenState a = Closed a | Open a deriving (Show, Eq)
+
+isOpen :: OpenState a -> Bool
+isOpen (Closed _) = False
+isOpen _          = True
+
+fromOpenState :: OpenState a -> a
+fromOpenState (Open d)   = d
+fromOpenState (Closed d) = d
+
+doors :: VehicleData -> Maybe [OpenState Door]
+doors b = traverse ds $ zip ["df", "dr", "pf", "pr", "ft", "rt"] [minBound..]
+  where
+    ds (k,d) = c d <$> maybeVal b ^? _Just . key "vehicle_state" . key k . _Integer
+    c d 0 = Closed d
+    c d _ = Open   d
+
+openDoors :: VehicleData -> [Door]
+openDoors b = fromMaybe [] $ (map fromOpenState . filter isOpen <$> doors b)
