@@ -145,8 +145,8 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
         -- idiotCheck == verify state when user not present
         where idiotCheck vdata = mapM_ reportOpen (openDoors vdata)
-              reportOpen d = publishq mc (optMQTTTopic <> "/door/ " <> pack (show d))
-                             "open" True QoS2 [PropMessageExpiryInterval 900]
+              reportOpen d = publishq mc (optMQTTTopic <> "/door/" <> pack (show d))
+                             "open" False QoS2 []
 
 
     tdbAPI db mc t m props = call ((snd . breakOnEnd "/") t) ret m
