@@ -6,6 +6,7 @@ module Main where
 import           Control.Concurrent.Async   (concurrently, mapConcurrently_)
 import qualified Control.Exception          as E
 import           Control.Monad              (unless, (<=<))
+import           Control.Monad.IO.Class     (MonadIO (..))
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -61,6 +62,15 @@ options = Options
   <*> switch (long "clean-session" <> help "Clean the MQTT session")
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
 
+logErr :: MonadIO m => String -> m ()
+logErr = liftIO . errorM rootLoggerName
+
+logInfo :: MonadIO m => String -> m ()
+logInfo = liftIO . infoM rootLoggerName
+
+logDbg :: MonadIO m => String -> m ()
+logDbg = liftIO . debugM rootLoggerName
+
 type Callback = MQTTClient -> Topic -> BL.ByteString -> [Property] -> IO ()
 
 withMQTT :: Options -> Callback -> (MQTTClient -> IO ()) -> IO ()
@@ -76,12 +86,12 @@ withMQTT Options{..} cb = E.bracket conn normalDisconnect
                                               PropRequestResponseInformation 1,
                                               PropRequestProblemInformation 1]}
             optMQTTURI
-      props <- svrProps mc
-      debugM rootLoggerName $ mconcat ["MQTT connected: ", show props]
+      ack <- connACK mc
+      logDbg $ mconcat ["MQTT connected: ", show ack]
       pure mc
 
 logData :: VehicleData -> IO ()
-logData vd = unless (up || null od) $ infoM rootLoggerName $ mconcat [
+logData vd = unless (up || null od) $ logInfo $ mconcat [
   "User is not present, but the following doors are open at ", show ts, ": ", show od]
   where
     up = isUserPresent vd
@@ -90,17 +100,17 @@ logData vd = unless (up || null od) $ infoM rootLoggerName $ mconcat [
 
 tryInsert :: Connection -> VehicleData -> IO ()
 tryInsert db vd = E.catch (insertVData db vd)
-                  (\ex -> errorM rootLoggerName $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
-                                                           show (ex :: SQLError)])
+                  (\ex -> logErr $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
+                                            show (ex :: SQLError)])
 
 backfill :: Connection -> MQTTClient -> Topic -> IO ()
 backfill db mc dtopic = do
-  infoM rootLoggerName $ "Beginning backfill"
+  logInfo $ "Beginning backfill"
   (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> listDays db)
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
   traverse_ doDay dayDiff
-  infoM rootLoggerName $ "Backfill complete"
+  logInfo $ "Backfill complete"
 
     where
       remoteDays :: IO (Maybe (Map String Int))
@@ -111,18 +121,18 @@ backfill db mc dtopic = do
 
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
-        infoM rootLoggerName $ mconcat ["Backfilling ", d]
+        logInfo $ mconcat ["Backfilling ", d]
         (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay db d)
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
-        debugM rootLoggerName $ mconcat ["missing: ", show missing]
-        debugM rootLoggerName $ mconcat ["extra: ", show extra]
+        logDbg $ mconcat ["missing: ", show missing]
+        logDbg $ mconcat ["extra: ", show extra]
 
         mapConcurrently_ doOne missing
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
-        debugM rootLoggerName $ mconcat ["Fetching remote data from ", show ts]
+        logDbg $ mconcat ["Fetching remote data from ", show ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
         tryInsert db vd
@@ -139,7 +149,7 @@ run opts@Options{..} = do
     sink db _ _ m _ = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
-      debugM rootLoggerName $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
+      logDbg $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
       logData m
       tryInsert db m
 
@@ -148,7 +158,7 @@ run opts@Options{..} = do
 
       withMQTT opts (sink db) $ \mc -> do
         subr <- subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2, _retainHandling=SendOnSubscribeNew})] mempty
-        debugM rootLoggerName $ mconcat ["Sub response: ", show subr]
+        logDbg $ mconcat ["Sub response: ", show subr]
 
         unless optNoBackfill $ backfill db mc optMQTTTopic
 
