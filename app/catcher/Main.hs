@@ -67,7 +67,7 @@ withMQTT :: Options -> Callback -> (MQTTClient -> IO ()) -> IO ()
 withMQTT Options{..} cb = E.bracket conn normalDisconnect
   where
     conn = do
-      mc <- connectURI mqttConfig{_cleanSession=False,
+      mc <- connectURI mqttConfig{_cleanSession=optSessionTime == 0,
                                   _protocol=Protocol50,
                                   _msgCB=SimpleCallback cb,
                                   _connProps=[PropReceiveMaximum 65535,
