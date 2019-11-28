@@ -6,7 +6,7 @@ import           Control.Monad          (guard)
 import           Data.Time.Clock        (UTCTime)
 import           Database.SQLite.Simple hiding (bind, close)
 
-import           Tesla                  (VehicleData, teslaTS)
+import           Tesla.Car              (VehicleData, teslaTS)
 
 dbInit :: Connection -> IO ()
 dbInit db = do

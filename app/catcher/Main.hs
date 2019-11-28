@@ -36,7 +36,7 @@ import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
                                              errorM, infoM, rootLoggerName,
                                              setLevel, updateGlobalLogger)
 
-import           Tesla
+import           Tesla.Car
 import           Tesla.DB
 
 data Options = Options {

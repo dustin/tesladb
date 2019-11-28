@@ -37,6 +37,7 @@ import           System.Timeout             (timeout)
 
 import           Tesla
 import           Tesla.AuthDB
+import           Tesla.Car
 import           Tesla.DB
 
 data Options = Options {

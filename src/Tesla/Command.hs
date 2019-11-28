@@ -13,6 +13,7 @@ import           Network.Wreq           (Response, asJSON, postWith,
 import           Network.Wreq.Types     (Postable)
 
 import           Tesla
+import           Tesla.Car
 
 type CommandResponse = Either Text ()
 

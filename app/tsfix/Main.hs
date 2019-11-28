@@ -11,7 +11,7 @@ import           Database.SQLite.Simple.FromField
 import           Database.SQLite.Simple.Ok
 import           System.Environment               (getArgs)
 
-import           Tesla
+import           Tesla.Car
 import           Tesla.DB
 
 newtype VD = VD { unVD :: VehicleData }
