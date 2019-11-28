@@ -38,6 +38,8 @@ dependencies:
 - stm
 - net-mqtt
 - time
+- mtl
+- transformers
 
 library:
   source-dirs: src
