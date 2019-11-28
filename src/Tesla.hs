@@ -4,9 +4,10 @@
 
 module Tesla
     ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
-      fromToken, vehicleData, VehicleData,
+      fromToken, vehicleData, VehicleData, VehicleID, vehicleURL,
       isUserPresent, isCharging, teslaTS, maybeTeslaTS,
-      Door(..), OpenState(..), doors, openDoors
+      Door(..), OpenState(..), doors, openDoors,
+      authOpts
     ) where
 
 
@@ -39,8 +40,10 @@ authRefreshURL = baseURL <> "oauth/token"
 vehiclesURL :: String
 vehiclesURL = baseURL <> "api/1/vehicles"
 
-vehicleURL :: String -> String
-vehicleURL vid = mconcat [baseURL, "api/1/vehicles/", vid, "/vehicle_data"]
+type VehicleID = String
+
+vehicleURL :: VehicleID -> String -> String
+vehicleURL vid c = mconcat [baseURL, "api/1/vehicles/", vid, "/", c]
 
 userAgent :: BC.ByteString
 userAgent = "github.com/dustin/tesladb 0.1"
@@ -104,9 +107,9 @@ vehicles ai = do
 
 type VehicleData = BL.ByteString
 
-vehicleData :: AuthInfo -> String -> IO VehicleData
+vehicleData :: AuthInfo -> VehicleID -> IO VehicleData
 vehicleData ai vid = do
-  r <- getWith (authOpts ai) (vehicleURL vid)
+  r <- getWith (authOpts ai) (vehicleURL vid "vehicle_data")
   pure . fromJust . inner $ r ^. responseBody
     where inner = BL.stripPrefix "{\"response\":" <=< BL.stripSuffix "}"
 
