@@ -29,7 +29,7 @@ runCmd :: Postable p => String -> p -> Command CommandResponse
 runCmd cmd p = do
   a <- asks authInfo
   v <- asks vid
-  r <- liftIO (asJSON =<< postWith (authOpts a) (vehicleURL v cmd) p :: IO (Response Value))
+  r <- liftIO (asJSON =<< postWith (authOpts a) (vehicleURL v $ "command/" <> cmd) p :: IO (Response Value))
   pure $ case (r ^? responseBody . key "response" . key "result" . _Bool) of
     Just True  -> Right ()
     _ -> Left $ r ^. responseBody . key "response" . key "reason" . _String

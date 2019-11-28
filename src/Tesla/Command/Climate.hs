@@ -12,15 +12,15 @@ import           Tesla.Command
 
 -- | Turn HVAC on.
 hvacOn :: Command CommandResponse
-hvacOn = runCmd' "command/auto_conditioning_start"
+hvacOn = runCmd' "auto_conditioning_start"
 
 -- | Turn HVAC off.
 hvacOff :: Command CommandResponse
-hvacOff = runCmd' "command/auto_conditioning_stop"
+hvacOff = runCmd' "auto_conditioning_stop"
 
 -- | Turn on the steering wheel heater
 wheelHeater :: Bool -> Command CommandResponse
-wheelHeater on = runCmd "command/remote_steering_wheel_heater_request" ["on" := map toLower (show on)]
+wheelHeater on = runCmd "remote_steering_wheel_heater_request" ["on" := map toLower (show on)]
 
 wheelHeaterOn :: Command CommandResponse
 wheelHeaterOn = wheelHeater True
@@ -33,7 +33,7 @@ data Seat = DriverSeat | PassengerSeat | RearLeftSeat | RearCenterSeat | RearRig
 -- | Set heating levels for various seats.
 heatSeat :: Seat -> Int -> Command CommandResponse
 heatSeat seat level = do
-  runCmd "command/remote_seat_heater_request" ["heater" := seatNum seat, "level" := level]
+  runCmd "remote_seat_heater_request" ["heater" := seatNum seat, "level" := level]
   where
     seatNum :: Seat -> Int
     seatNum DriverSeat     = 0
@@ -45,5 +45,5 @@ heatSeat seat level = do
 -- | Set the main HVAC temperatures.
 setTemps :: (Double, Double) -> Command CommandResponse
 setTemps (driver, passenger) = do
-  runCmd "command/set_temps" ["driver_temp" := driver, "passenger_temp" := passenger]
+  runCmd "set_temps" ["driver_temp" := driver, "passenger_temp" := passenger]
 
