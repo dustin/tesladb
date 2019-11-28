@@ -8,11 +8,11 @@ import           Network.Wreq  (FormParam (..))
 
 import           Tesla.Command
 
-startCharging :: Command CommandResponse
+startCharging :: Car CommandResponse
 startCharging = runCmd' "charge_start"
 
-stopCharging :: Command CommandResponse
+stopCharging :: Car CommandResponse
 stopCharging = runCmd' "charge_stop"
 
-setLimit :: Int -> Command CommandResponse
+setLimit :: Int -> Car CommandResponse
 setLimit to = runCmd "set_charge_limit" ["percent" := to ]

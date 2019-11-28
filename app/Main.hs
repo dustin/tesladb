@@ -184,7 +184,7 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
         call x _ _ = infoM rootLoggerName $ mconcat ["Call to invalid path: ", show x]
 
-gather :: Options -> TChan  VehicleData -> IO ()
+gather :: Options -> TChan VehicleData -> IO ()
 gather Options{..} ch = do
   vids <- vehicles =<< toke
   let vid = vids Map.! optVName
@@ -192,7 +192,7 @@ gather Options{..} ch = do
 
   forever $ do
     debugM rootLoggerName "Fetching"
-    vdata <- toke >>= \ai -> timeout 10000000 $ vehicleData ai (unpack vid)
+    vdata <- toke >>= \ai -> timeout 10000000 $ runCar ai (unpack vid) vehicleData
     nt <- process vid vdata
     threadDelay nt
 

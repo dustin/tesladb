@@ -6,6 +6,7 @@ module Tesla
     ( authenticate, refreshAuth, AuthResponse(..), vehicles, AuthInfo(..),
       fromToken, vehicleData, VehicleData, VehicleID, vehicleURL,
       isUserPresent, isCharging, teslaTS, maybeTeslaTS,
+      Car, runCar, authInfo, vehicleID,
       Door(..), OpenState(..), doors, openDoors,
       authOpts
     ) where
@@ -13,6 +14,8 @@ module Tesla
 
 import           Control.Lens
 import           Control.Monad          ((<=<))
+import           Control.Monad.IO.Class (MonadIO (..))
+import           Control.Monad.Reader   (ReaderT (..), asks, runReaderT)
 import           Data.Aeson             (FromJSON (..), Options (..),
                                          Value (..), decode, defaultOptions,
                                          fieldLabelModifier, genericParseJSON)
@@ -42,8 +45,24 @@ vehiclesURL = baseURL <> "api/1/vehicles"
 
 type VehicleID = String
 
+data CarEnv = CarEnv {
+  _authInfo :: AuthInfo,
+  _vid      :: VehicleID
+  }
+
+authInfo :: Car AuthInfo
+authInfo = asks _authInfo
+
+vehicleID :: Car VehicleID
+vehicleID = asks _vid
+
+type Car = ReaderT CarEnv IO
+
+runCar :: AuthInfo -> VehicleID -> Car a -> IO a
+runCar ai vi f = runReaderT f (CarEnv ai vi)
+
 vehicleURL :: VehicleID -> String -> String
-vehicleURL vid c = mconcat [baseURL, "api/1/vehicles/", vid, "/", c]
+vehicleURL v c = mconcat [baseURL, "api/1/vehicles/", v, "/", c]
 
 userAgent :: BC.ByteString
 userAgent = "github.com/dustin/tesladb 0.1"
@@ -107,9 +126,11 @@ vehicles ai = do
 
 type VehicleData = BL.ByteString
 
-vehicleData :: AuthInfo -> VehicleID -> IO VehicleData
-vehicleData ai vid = do
-  r <- getWith (authOpts ai) (vehicleURL vid "vehicle_data")
+vehicleData :: Car VehicleData
+vehicleData = do
+  a <- authInfo
+  v <- vehicleID
+  r <- liftIO $ getWith (authOpts a) (vehicleURL v "vehicle_data")
   pure . fromJust . inner $ r ^. responseBody
     where inner = BL.stripPrefix "{\"response\":" <=< BL.stripSuffix "}"
 
