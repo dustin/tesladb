@@ -38,7 +38,6 @@ import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
 import           Text.Read                  (readMaybe)
 import           UnliftIO.Timeout           (timeout)
 
-import           Tesla
 import           Tesla.AuthDB
 import           Tesla.Car
 import           Tesla.Command
@@ -49,7 +48,7 @@ import qualified Tesla.Command.Software     as CMD
 import           Tesla.DB
 
 data Options = Options {
-  optDBPath        :: String
+  optDBPath        :: FilePath
   , optVName       :: Text
   , optNoMQTT      :: Bool
   , optVerbose     :: Bool
@@ -135,7 +134,7 @@ die :: String -> IO ()
 die = throwIO . Die
 
 mqttSink :: Sink
-mqttSink opts@Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
+mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
   where
     withMQTT db = bracket (connect db) disco
@@ -189,7 +188,7 @@ mqttSink opts@Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) st
             f _                       = False
 
         callCMD :: Text -> Car CommandResponse -> IO ()
-        callCMD rt a = runNamedCar optVName (toke opts) $ do
+        callCMD rt a = runNamedCar optVName (loadAuthInfo optDBPath) $ do
           logInfo $ mconcat ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
           logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", show r]
@@ -240,12 +239,9 @@ mqttSink opts@Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) st
 sleep :: MonadIO m => Int -> m ()
 sleep = liftIO . threadDelay
 
-toke :: Options -> IO AuthInfo
-toke Options{..} = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
-
 gather :: Options -> TChan VehicleData -> IO ()
-gather opts@Options{..} ch = do
-  runNamedCar optVName (toke opts) $ do
+gather Options{..} ch = do
+  runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- vehicleID
     logInfo $ mconcat ["Looping with vid: ", show vid]
 

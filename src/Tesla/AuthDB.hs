@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
-module Tesla.AuthDB (updateAuth, loadAuth) where
+module Tesla.AuthDB (updateAuth, loadAuth, loadAuthInfo) where
 
 import           Control.Monad          (guard)
 import           Database.SQLite.Simple hiding (bind, close)
 
-import           Tesla                  (AuthResponse (..))
+import           Tesla                  (AuthInfo (..), AuthResponse (..),
+                                         fromToken)
 
 createStatement :: Query
 createStatement = "create table if not exists authinfo (ts, access_token, refresh_token, expires_in)"
@@ -20,7 +21,7 @@ deleteStatement = "delete from authinfo"
 selectStatement :: Query
 selectStatement = "select access_token, refresh_token, expires_in from authinfo"
 
-updateAuth :: String -> AuthResponse -> IO ()
+updateAuth :: FilePath -> AuthResponse -> IO ()
 updateAuth dbPath AuthResponse{..} = withConnection dbPath up
   where up db = do
           execute_ db createStatement
@@ -28,10 +29,13 @@ updateAuth dbPath AuthResponse{..} = withConnection dbPath up
             execute_ db deleteStatement
             execute db insertStatement (_access_token, _refresh_token, _expires_in)
 
-loadAuth :: String -> IO AuthResponse
+loadAuth :: FilePath -> IO AuthResponse
 loadAuth dbPath = withConnection dbPath up
   where up db = do
           rows <- query_ db selectStatement :: IO [(String, String, Int)]
           guard (length rows == 1)
           let [(_access_token, _refresh_token, _expires_in)] = rows
           pure $ AuthResponse{..}
+
+loadAuthInfo :: FilePath -> IO AuthInfo
+loadAuthInfo p = loadAuth p >>= \AuthResponse{..} -> pure $ fromToken _access_token
