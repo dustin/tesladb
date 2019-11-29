@@ -3,7 +3,7 @@
 
 module Tesla.Car (vehicleData, VehicleData, VehicleID, vehicleURL,
       isUserPresent, isCharging, teslaTS, maybeTeslaTS,
-      Car, runCar, authInfo, vehicleID,
+      Car, runCar, runNamedCar, authInfo, vehicleID,
       Door(..), OpenState(..), doors, openDoors) where
 
 import           Control.Lens
@@ -13,8 +13,10 @@ import           Control.Monad.Reader   (ReaderT (..), asks, runReaderT)
 import           Data.Aeson             (Value (..), decode)
 import           Data.Aeson.Lens        (key, _Bool, _Integer)
 import qualified Data.ByteString.Lazy   as BL
+import qualified Data.Map.Strict        as Map
 import           Data.Maybe             (fromJust, fromMaybe)
 import           Data.Ratio
+import           Data.Text              (Text, unpack)
 import           Data.Time.Clock        (UTCTime)
 import           Data.Time.Clock.POSIX  (posixSecondsToUTCTime)
 import           Network.Wreq           (getWith, responseBody)
@@ -41,6 +43,11 @@ type Car = ReaderT CarEnv IO
 
 runCar :: AuthInfo -> VehicleID -> Car a -> IO a
 runCar ai vi f = runReaderT f (CarEnv ai vi)
+
+runNamedCar :: Text -> AuthInfo -> Car a -> IO a
+runNamedCar name ai f = do
+  vs <- vehicles ai
+  runCar ai (unpack $ vs Map.! name) f
 
 type VehicleData = BL.ByteString
 
