@@ -2,7 +2,7 @@
 
 module Tesla.Command.Climate (
   hvacOn, hvacOff, heatSeat, Seat(..),
-  setTemps, wheelHeaterOff, wheelHeaterOn
+  setTemps, wheelHeater, wheelHeaterOff, wheelHeaterOn
   ) where
 
 import           Data.Char     (toLower)

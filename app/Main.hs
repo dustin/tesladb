@@ -20,8 +20,9 @@ import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, isJust)
-import           Data.Text                  (Text, breakOnEnd, pack)
+import           Data.Maybe                 (fromJust, fromMaybe, isJust)
+import           Data.Text                  (Text)
+import qualified Data.Text                  as T
 import qualified Data.Text.Encoding         as TE
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
@@ -34,11 +35,17 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
 import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
                                              errorM, infoM, rootLoggerName,
                                              setLevel, updateGlobalLogger)
+import           Text.Read                  (readMaybe)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
 import           Tesla.AuthDB
 import           Tesla.Car
+import           Tesla.Command
+import qualified Tesla.Command.Charging     as CMD
+import qualified Tesla.Command.Climate      as CMD
+import qualified Tesla.Command.Sharing      as CMD
+import qualified Tesla.Command.Software     as CMD
 import           Tesla.DB
 
 data Options = Options {
@@ -119,11 +126,14 @@ instance Exception DisconnectedException
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
 
+textToBL :: Text -> BL.ByteString
+textToBL = BL.fromStrict . TE.encodeUtf8
+
 die :: String -> IO ()
 die = throwIO . Die
 
 mqttSink :: Sink
-mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
+mqttSink opts@Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
   where
     withMQTT db = bracket (connect db) disco
@@ -161,9 +171,11 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
                                         <> (BC.pack . show) ds) False QoS2 []
 
 
-    tdbAPI db mc t m props = call ((snd . breakOnEnd "/") t) ret m
+    tdbAPI db mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
 
       where
+        cmd = T.stripPrefix (T.dropWhileEnd (== '#') optInTopic)
+
         ret = blToText . foldr f "" $ props
           where f (PropResponseTopic r) _ = r
                 f _                     o = o
@@ -173,6 +185,34 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
             f (PropCorrelationData{}) = True
             f (PropUserProperty{})    = True
             f _                       = False
+
+        callCMD :: Text -> Car CommandResponse -> IO ()
+        callCMD rt a = runNamedCar optVName (toke opts) $ do
+          logInfo $ mconcat ["Running command: ", cmdname]
+          r <- a
+          logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", show r]
+          liftIO $ publishq mc rt (res r) False QoS2 rprops
+            where cmdname = T.unpack . fromJust . cmd $ t
+                  res = either textToBL (const "")
+
+        call "cmd/sw/schedule" res x = callCMD res $ CMD.schedule d
+          where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
+
+        call "cmd/sw/cancel" res _ = callCMD res CMD.cancel
+
+        call "cmd/charging/start" res _ = callCMD res CMD.startCharging
+        call "cmd/charging/stop" res _ = callCMD res CMD.stopCharging
+        call "cmd/charging/limit" res x = callCMD res $ CMD.setLimit d
+          where d = fromMaybe 80 (readMaybe . BC.unpack $ x)
+
+        call "cmd/hvac/on" res _ = callCMD res CMD.hvacOn
+        call "cmd/hvac/off" res _ = callCMD res CMD.hvacOff
+        call "cmd/hvac/wheel" res x = callCMD res $ CMD.wheelHeater (x == "on")
+        -- TODO: seats and temps.  Have to think of how I want to express these.
+
+        call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
+
+        -- everything below this is RPC and requires a response topic.
 
         call p "" _ = logInfo $ mconcat ["request to ", show p, " with no response topic"]
 
@@ -198,16 +238,19 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 sleep :: MonadIO m => Int -> m ()
 sleep = liftIO . threadDelay
 
+toke :: Options -> IO AuthInfo
+toke Options{..} = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
+
 gather :: Options -> TChan VehicleData -> IO ()
-gather Options{..} ch = do
-  runNamedCar optVName toke $ do
+gather opts@Options{..} ch = do
+  runNamedCar optVName (toke opts) $ do
     vid <- vehicleID
     logInfo $ mconcat ["Looping with vid: ", show vid]
 
     forever $ do
       logDbg "Fetching"
       vdata <- timeout 10000000 vehicleData
-      nt <- liftIO $ process (pack vid) vdata
+      nt <- liftIO $ process (T.pack vid) vdata
       sleep nt
 
   where
@@ -227,9 +270,6 @@ gather Options{..} ch = do
                                       " user present: ", show $ isUserPresent vdata,
                                       ", charging: ", show $ isCharging vdata]
       pure $ naptime vdata
-
-    toke :: IO AuthInfo
-    toke = loadAuth optDBPath >>= \AuthResponse{..} -> pure $ fromToken _access_token
 
 raceABunch_ :: [IO a] -> IO ()
 raceABunch_ is = traverse async is >>= void.waitAnyCancel
