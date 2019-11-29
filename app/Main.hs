@@ -200,14 +200,13 @@ sleep = liftIO . threadDelay
 
 gather :: Options -> TChan VehicleData -> IO ()
 gather Options{..} ch = do
-  ai <- toke
-  runNamedCar optVName ai $ do
+  runNamedCar optVName toke $ do
     vid <- vehicleID
     logInfo $ mconcat ["Looping with vid: ", show vid]
 
     forever $ do
       logDbg "Fetching"
-      vdata <- timeout 10000000 $ vehicleData
+      vdata <- timeout 10000000 vehicleData
       nt <- liftIO $ process (pack vid) vdata
       sleep nt
 

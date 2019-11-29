@@ -29,24 +29,25 @@ vehicleURL v c = mconcat [baseURL, "api/1/vehicles/", v, "/", c]
 type VehicleID = String
 
 data CarEnv = CarEnv {
-  _authInfo :: AuthInfo,
+  _authInfo :: IO AuthInfo,
   _vid      :: VehicleID
   }
 
 authInfo :: Car AuthInfo
-authInfo = asks _authInfo
+authInfo = liftIO =<< asks _authInfo
 
 vehicleID :: Car VehicleID
 vehicleID = asks _vid
 
 type Car = ReaderT CarEnv IO
 
-runCar :: AuthInfo -> VehicleID -> Car a -> IO a
+runCar :: IO AuthInfo -> VehicleID -> Car a -> IO a
 runCar ai vi f = runReaderT f (CarEnv ai vi)
 
-runNamedCar :: Text -> AuthInfo -> Car a -> IO a
+runNamedCar :: Text -> IO AuthInfo -> Car a -> IO a
 runNamedCar name ai f = do
-  vs <- vehicles ai
+  a <- ai
+  vs <- vehicles a
   runCar ai (unpack $ vs Map.! name) f
 
 type VehicleData = BL.ByteString
