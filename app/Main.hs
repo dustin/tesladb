@@ -252,7 +252,7 @@ gather Options{..} ch = do
     forever $ do
       logDbg "Fetching"
       vdata <- timeout 10000000 vehicleData
-      nt <- liftIO $ process (T.pack vid) vdata
+      nt <- process (T.pack vid) vdata
       sleep nt
 
   where
@@ -262,11 +262,11 @@ gather Options{..} ch = do
           | isCharging vdata    = 300000000
           | otherwise           = 600000000
 
-    process :: Text -> Maybe VehicleData -> IO Int
+    process :: MonadIO m => Text -> Maybe VehicleData -> m Int
     process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60000000
     process vid (Just vdata) = do
       logInfo $ mconcat ["Fetched data for vid: ", show vid]
-      atomically $ writeTChan ch vdata
+      liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
       logInfo $ mconcat ["Sleeping for ", show nt,
                                       " user present: ", show $ isUserPresent vdata,
