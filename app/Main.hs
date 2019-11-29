@@ -187,12 +187,16 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
             f (PropUserProperty{})    = True
             f _                       = False
 
+        respond :: MonadIO m => Text -> BL.ByteString -> [Property] -> m ()
+        respond "" _  _ = pure ()
+        respond rt rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
+
         callCMD :: Text -> Car CommandResponse -> IO ()
         callCMD rt a = runNamedCar optVName (loadAuthInfo optDBPath) $ do
           logInfo $ mconcat ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
           logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", show r]
-          liftIO $ publishq mc rt (res r) False QoS2 rprops
+          respond rt (res r) []
             where cmdname = T.unpack . fromJust . cmd $ t
                   res = either textToBL (const "")
 
@@ -213,26 +217,26 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
 
-        -- everything below this is RPC and requires a response topic.
+        -- All RPCs below require a response topic.
 
         call p "" _ = logInfo $ mconcat ["request to ", show p, " with no response topic"]
 
         call "days" res _ = do
           logInfo $ mconcat ["Days call responding to ", show res]
           days <- listDays db
-          publishq mc res (encode . Map.fromList $ days) False QoS2 ([PropContentType "application/json"] <> rprops)
+          respond res (encode . Map.fromList $ days) [PropContentType "application/json"]
 
         call "day" res d = do
           logInfo $ mconcat ["Day call for ", show d, " responding to ", show res]
           days <- listDay db (BC.unpack d)
-          publishq mc res (encode days) False QoS2 ([PropContentType "application/json"] <> rprops)
+          respond res (encode days) [PropContentType "application/json"]
 
         call "fetch" res tss = do
           logInfo $ mconcat ["Fetch call for ", show tss, " responding to ", show res]
           let mts = decode ("\"" <> tss <> "\"")
           guard $ isJust mts
           vdata <- fetchDatum db (fromJust mts)
-          publishq mc res vdata False QoS2 ([PropContentType "application/json"] <> rprops)
+          respond res vdata [PropContentType "application/json"]
 
         call x _ _ = logInfo $ mconcat ["Call to invalid path: ", show x]
 
