@@ -49,13 +49,14 @@ import qualified Tesla.Command.Software     as CMD
 import           Tesla.DB
 
 data Options = Options {
-  optDBPath      :: String
-  , optVName     :: Text
-  , optNoMQTT    :: Bool
-  , optVerbose   :: Bool
-  , optMQTTURI   :: URI
-  , optMQTTTopic :: Text
-  , optInTopic   :: Text
+  optDBPath        :: String
+  , optVName       :: Text
+  , optNoMQTT      :: Bool
+  , optVerbose     :: Bool
+  , optMQTTURI     :: URI
+  , optMQTTTopic   :: Text
+  , optInTopic     :: Text
+  , optCMDsEnabled :: Bool
   }
 
 options :: Parser Options
@@ -67,6 +68,7 @@ options = Options
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
+  <*> switch (long "enable-commands" <> help "enable remote commands")
 
 type Sink = Options -> TChan VehicleData -> IO ()
 
@@ -188,8 +190,8 @@ mqttSink opts@Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) st
 
         callCMD :: Text -> Car CommandResponse -> IO ()
         callCMD rt a = runNamedCar optVName (toke opts) $ do
-          logInfo $ mconcat ["Running command: ", cmdname]
-          r <- a
+          logInfo $ mconcat ["Command requested: ", cmdname]
+          r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
           logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", show r]
           liftIO $ publishq mc rt (res r) False QoS2 rprops
             where cmdname = T.unpack . fromJust . cmd $ t
