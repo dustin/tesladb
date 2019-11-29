@@ -1,13 +1,19 @@
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE DeriveGeneric          #-}
+{-# LANGUAGE DuplicateRecordFields  #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
+{-# LANGUAGE OverloadedStrings      #-}
+{-# LANGUAGE RecordWildCards        #-}
+{-# LANGUAGE TemplateHaskell        #-}
 
 module Tesla.Car (vehicleData, VehicleData, VehicleID, vehicleURL,
       isUserPresent, isCharging, teslaTS, maybeTeslaTS,
       Car, runCar, runNamedCar, authInfo, vehicleID,
       Door(..), OpenState(..), doors, openDoors,
       Location(..), DestinationCharger(..), Supercharger(..), Charger(..),
-      nearbyChargers, superchargers, destinationChargers
+      nearbyChargers, superchargers, destinationChargers,
+      lat, lon, _SC, _DC,
+      name, location, distance_miles, available_stalls, total_stalls, site_closed
       ) where
 
 import           Control.Lens
@@ -17,11 +23,12 @@ import           Control.Monad.Reader   (ReaderT (..), asks, runReaderT)
 import           Data.Aeson             (FromJSON (..), Options (..),
                                          Result (..), Value (..), decode,
                                          defaultOptions, fieldLabelModifier,
-                                         fromJSON, genericParseJSON)
+                                         fromJSON, genericParseJSON, withObject,
+                                         (.:))
 import           Data.Aeson.Lens        (key, _Array, _Bool, _Integer)
 import qualified Data.ByteString.Lazy   as BL
 import qualified Data.Map.Strict        as Map
-import           Data.Maybe             (fromJust, fromMaybe, mapMaybe)
+import           Data.Maybe             (fromJust, fromMaybe)
 import           Data.Ratio
 import           Data.Text              (Text, unpack)
 import           Data.Time.Clock        (UTCTime)
@@ -124,49 +131,52 @@ doors b = traverse ds $ zip ["df", "dr", "pf", "pr", "ft", "rt"] [minBound..]
 openDoors :: VehicleData -> [Door]
 openDoors b = fromMaybe [] $ (map fromOpenState . filter isOpen <$> doors b)
 
-data Location = Location { _lat :: Double, _long :: Double } deriving (Show, Generic)
+data Location = Location { _lat :: Double, _lon :: Double } deriving (Show, Generic)
+
+makeLenses ''Location
 
 instance FromJSON Location where
-  parseJSON = genericParseJSON defaultOptions{fieldLabelModifier = dropWhile (== '_')}
+  parseJSON = withObject "location" $ \v -> Location <$> v .: "lat" <*> v .: "long"
 
 chargeOpts :: Data.Aeson.Options
 chargeOpts = defaultOptions {
-  fieldLabelModifier = drop 4
+  fieldLabelModifier = dropWhile (== '_')
   }
 
 data DestinationCharger = DestinationCharger {
-  _dc_location       :: Location,
-  _dc_name           :: Text,
-  _dc_distance_miles :: Double
+  _location       :: Location,
+  _name           :: Text,
+  _distance_miles :: Double
   } deriving (Show, Generic)
+
+makeFieldsNoPrefix ''DestinationCharger
 
 instance FromJSON DestinationCharger where
   parseJSON = genericParseJSON chargeOpts
 
 data Supercharger = Supercharger {
-  _sc_location         :: Location,
-  _sc_name             :: Text,
-  _sc_distance_miles   :: Double,
-  _sc_available_stalls :: Int,
-  _sc_total_stalls     :: Int,
-  _sc_site_closed      :: Bool
+  _location         :: Location,
+  _name             :: Text,
+  _distance_miles   :: Double,
+  _available_stalls :: Int,
+  _total_stalls     :: Int,
+  _site_closed      :: Bool
   } deriving(Show, Generic)
+
+makeFieldsNoPrefix ''Supercharger
 
 instance FromJSON Supercharger where
   parseJSON = genericParseJSON chargeOpts
 
 data Charger = SC Supercharger | DC DestinationCharger deriving(Show)
 
+makePrisms ''Charger
+
 superchargers :: [Charger] -> [Supercharger]
-superchargers = mapMaybe f
-  where f (SC x) = Just x
-        f _      = Nothing
+superchargers = toListOf (folded . _SC)
 
 destinationChargers :: [Charger] -> [DestinationCharger]
-destinationChargers = mapMaybe f
-  where f (DC x) = Just x
-        f _      = Nothing
-
+destinationChargers = toListOf (folded . _DC)
 
 nearbyChargers :: Car [Charger]
 nearbyChargers = do
