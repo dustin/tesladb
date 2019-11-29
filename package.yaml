@@ -41,6 +41,7 @@ dependencies:
 - mtl
 - transformers
 - unliftio
+- vector
 
 library:
   source-dirs: src

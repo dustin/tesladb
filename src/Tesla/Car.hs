@@ -1,25 +1,35 @@
+{-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
 module Tesla.Car (vehicleData, VehicleData, VehicleID, vehicleURL,
       isUserPresent, isCharging, teslaTS, maybeTeslaTS,
       Car, runCar, runNamedCar, authInfo, vehicleID,
-      Door(..), OpenState(..), doors, openDoors) where
+      Door(..), OpenState(..), doors, openDoors,
+      Location(..), DestinationCharger(..), Supercharger(..), Charger(..),
+      nearbyChargers, superchargers, destinationChargers
+      ) where
 
 import           Control.Lens
 import           Control.Monad          ((<=<))
 import           Control.Monad.IO.Class (MonadIO (..))
 import           Control.Monad.Reader   (ReaderT (..), asks, runReaderT)
-import           Data.Aeson             (Value (..), decode)
-import           Data.Aeson.Lens        (key, _Bool, _Integer)
+import           Data.Aeson             (FromJSON (..), Options (..),
+                                         Result (..), Value (..), decode,
+                                         defaultOptions, fieldLabelModifier,
+                                         fromJSON, genericParseJSON)
+import           Data.Aeson.Lens        (key, _Array, _Bool, _Integer)
 import qualified Data.ByteString.Lazy   as BL
 import qualified Data.Map.Strict        as Map
-import           Data.Maybe             (fromJust, fromMaybe)
+import           Data.Maybe             (fromJust, fromMaybe, mapMaybe)
 import           Data.Ratio
 import           Data.Text              (Text, unpack)
 import           Data.Time.Clock        (UTCTime)
 import           Data.Time.Clock.POSIX  (posixSecondsToUTCTime)
-import           Network.Wreq           (getWith, responseBody)
+import qualified Data.Vector            as V
+import           Generics.Deriving.Base (Generic)
+import           Network.Wreq           (Response, asJSON, getWith,
+                                         responseBody)
 
 import           Tesla
 
@@ -113,3 +123,62 @@ doors b = traverse ds $ zip ["df", "dr", "pf", "pr", "ft", "rt"] [minBound..]
 
 openDoors :: VehicleData -> [Door]
 openDoors b = fromMaybe [] $ (map fromOpenState . filter isOpen <$> doors b)
+
+data Location = Location { _lat :: Double, _long :: Double } deriving (Show, Generic)
+
+instance FromJSON Location where
+  parseJSON = genericParseJSON defaultOptions{fieldLabelModifier = dropWhile (== '_')}
+
+chargeOpts :: Data.Aeson.Options
+chargeOpts = defaultOptions {
+  fieldLabelModifier = drop 4
+  }
+
+data DestinationCharger = DestinationCharger {
+  _dc_location       :: Location,
+  _dc_name           :: Text,
+  _dc_distance_miles :: Double
+  } deriving (Show, Generic)
+
+instance FromJSON DestinationCharger where
+  parseJSON = genericParseJSON chargeOpts
+
+data Supercharger = Supercharger {
+  _sc_location         :: Location,
+  _sc_name             :: Text,
+  _sc_distance_miles   :: Double,
+  _sc_available_stalls :: Int,
+  _sc_total_stalls     :: Int,
+  _sc_site_closed      :: Bool
+  } deriving(Show, Generic)
+
+instance FromJSON Supercharger where
+  parseJSON = genericParseJSON chargeOpts
+
+data Charger = SC Supercharger | DC DestinationCharger deriving(Show)
+
+superchargers :: [Charger] -> [Supercharger]
+superchargers = mapMaybe f
+  where f (SC x) = Just x
+        f _      = Nothing
+
+destinationChargers :: [Charger] -> [DestinationCharger]
+destinationChargers = mapMaybe f
+  where f (DC x) = Just x
+        f _      = Nothing
+
+
+nearbyChargers :: Car [Charger]
+nearbyChargers = do
+  a <- authInfo
+  v <- vehicleID
+  r <- liftIO (asJSON =<< getWith (authOpts a) (vehicleURL v "nearby_charging_sites") :: IO (Response Value))
+  let rb = r ^. responseBody
+      chargers = parseOne rb SC "superchargers" <> parseOne rb DC "destination_charging"
+  pure (V.toList chargers)
+
+    where
+      parseOne rb f k =  let rs = traverse fromJSON (rb ^. key "response" . key k . _Array) in
+                           f <$> case rs of
+                                   Error e   -> error e
+                                   Success s -> s
