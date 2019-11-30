@@ -171,10 +171,10 @@ mqttSink = do
       unl . logInfo $ mconcat ["MQTT sub response: ", tshow subr]
       pure mc
 
-    disco Options{optMQTTURI} unl c = do
-      void . unl . logErr $ "disconnecting from " <> tshow optMQTTURI
-      normalDisconnect c
-      void . unl . logInfo $ "disconnected from " <> tshow optMQTTURI
+    disco Options{optMQTTURI} unl c = unl $ do
+      logErr $ "disconnecting from " <> tshow optMQTTURI
+      liftIO $ normalDisconnect c
+      logInfo $ "disconnected from " <> tshow optMQTTURI
 
     store Options{..} ch unl mc = forever $ do
       vdata <- atomically $ do
@@ -185,7 +185,7 @@ mqttSink = do
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
       unless (isUserPresent vdata) $ idiotCheck (openDoors vdata)
-      void . unl . logDbg $ "Delivered vdata via MQTT"
+      unl . logDbg $ "Delivered vdata via MQTT"
 
         -- idiotCheck == verify state when user not present
         where idiotCheck [] = pure ()
