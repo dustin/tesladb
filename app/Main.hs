@@ -203,6 +203,12 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
             where cmdname = T.unpack . fromJust . cmd $ t
                   res = either textToBL (const "")
 
+        callDBL :: Text -> BC.ByteString -> ((Double,Double) -> Car CommandResponse) -> IO ()
+        callDBL res x a = case readTwo x of
+                            Just ts -> callCMD res $ a ts
+                            Nothing -> respond res "Could not parse arguments (expected two double values)" []
+
+
         doSeat res seat level = callCMD res $ CMD.heatSeat seat d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ level)
 
@@ -233,24 +239,14 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "cmd/alerts/honk" res _ = callCMD res CMD.honkHorn
         call "cmd/alerts/flash" res _ = callCMD res CMD.flashLights
 
-        call "cmd/hvac/temps" res x =
-          case readTwo x of
-            Just ts -> callCMD res $ CMD.setTemps ts
-            Nothing -> respond res "Could not parse temperatures" []
-
+        call "cmd/hvac/temps" res x = callDBL res x CMD.setTemps
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
 
         call "cmd/windows/vent" res _ = callCMD res CMD.ventWindows
-        call "cmd/windows/close" res x =
-          case readTwo x of
-            Just loc -> callCMD res $ CMD.closeWindows loc
-            Nothing  -> respond res "failed to parse location" []
+        call "cmd/windows/close" res x = callDBL res x CMD.closeWindows
 
-        call "cmd/homelink/trigger" res x =
-          case readTwo x of
-            Just loc -> callCMD res $ CMD.trigger loc
-            Nothing  -> respond res "failed to parse location" []
+        call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
 
         -- All RPCs below require a response topic.
 
