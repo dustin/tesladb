@@ -5,8 +5,7 @@
 module Main where
 
 import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (AsyncCancelled (..), async, race_,
-                                             waitAnyCancel)
+import           Control.Concurrent.Async   (AsyncCancelled (..))
 import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
                                              newBroadcastTChanIO, orElse,
                                              readTChan, readTVar, registerDelay,
@@ -16,7 +15,7 @@ import           Control.Monad.Catch        (Exception, Handler (..),
                                              MonadCatch, SomeException (..),
                                              bracket, catches, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (withRunInIO)
+import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (LogLevel (..), LoggingT,
                                              MonadLogger, filterLogger,
                                              logDebugN, logErrorN, logInfoN,
@@ -39,6 +38,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              showDefault, strOption, switch,
                                              value, (<**>))
 import           Text.Read                  (readMaybe)
+import           UnliftIO.Async             (async, race_, waitAnyCancel)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
@@ -68,7 +68,7 @@ data SinkEnv = SinkEnv {
   _sink_chan    :: TChan VehicleData
   }
 
-type Sink = LoggingT (ReaderT SinkEnv IO)
+type Sink = ReaderT SinkEnv (LoggingT IO)
 
 options :: Parser Options
 options = Options
@@ -320,20 +320,22 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
                                       ", charging: ", tshow $ isCharging vdata]
       pure nt
 
-raceABunch_ :: [IO a] -> IO ()
+raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
 raceABunch_ is = traverse async is >>= void.waitAnyCancel
 
 run :: Options -> IO ()
-run opts@Options{optNoMQTT, optVerbose} = do
-  tch <- newBroadcastTChanIO
+run opts@Options{optNoMQTT, optVerbose} = withLog $ do
+  tch <- liftIO newBroadcastTChanIO
   let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
-  race_ (withLog $ gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
-  where d ch = atomically $ dupTChan ch
-        runSink f ch = runReaderT (withLog f) (SinkEnv opts ch)
-        logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
-        withLog :: MonadIO m => LoggingT m a -> m a
-        withLog = runStderrLoggingT . logfilt
+  where
+
+    d ch = liftIO . atomically $ dupTChan ch
+    runSink f ch = runReaderT f (SinkEnv opts ch)
+    logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
+    withLog :: MonadIO m => LoggingT m a -> m a
+    withLog = runStderrLoggingT . logfilt
 
 main :: IO ()
 main = run =<< execParser opts
