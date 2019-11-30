@@ -50,26 +50,26 @@ data CarEnv = CarEnv {
   _vid      :: VehicleID
   }
 
-authInfo :: Car AuthInfo
+authInfo :: MonadIO m => Car m AuthInfo
 authInfo = liftIO =<< asks _authInfo
 
-vehicleID :: Car VehicleID
+vehicleID :: Monad m => Car m VehicleID
 vehicleID = asks _vid
 
-type Car = ReaderT CarEnv IO
+type Car = ReaderT CarEnv
 
-runCar :: IO AuthInfo -> VehicleID -> Car a -> IO a
+runCar :: MonadIO m => IO AuthInfo -> VehicleID -> Car m a -> m a
 runCar ai vi f = runReaderT f (CarEnv ai vi)
 
-runNamedCar :: Text -> IO AuthInfo -> Car a -> IO a
+runNamedCar :: MonadIO m => Text -> IO AuthInfo -> Car m a -> m a
 runNamedCar name ai f = do
-  a <- ai
+  a <- liftIO ai
   vs <- vehicles a
   runCar ai (unpack $ vs Map.! name) f
 
 type VehicleData = BL.ByteString
 
-vehicleData :: Car VehicleData
+vehicleData :: MonadIO m => Car m VehicleData
 vehicleData = do
   a <- authInfo
   v <- vehicleID
@@ -178,7 +178,7 @@ superchargers = toListOf (folded . _SC)
 destinationChargers :: [Charger] -> [DestinationCharger]
 destinationChargers = toListOf (folded . _DC)
 
-nearbyChargers :: Car [Charger]
+nearbyChargers :: MonadIO m => Car m [Charger]
 nearbyChargers = do
   a <- authInfo
   v <- vehicleID

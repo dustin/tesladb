@@ -9,6 +9,7 @@ module Tesla
 
 
 import           Control.Lens
+import           Control.Monad.IO.Class (MonadIO (..))
 import           Data.Aeson             (FromJSON (..), Options (..),
                                          Value (..), defaultOptions,
                                          fieldLabelModifier, genericParseJSON)
@@ -85,9 +86,9 @@ authOpts :: AuthInfo -> Network.Wreq.Options
 authOpts AuthInfo{..} = defOpts & header "Authorization" .~ ["Bearer " <> BC.pack _bearerToken]
 
 -- Vehicle name -> vehicle ID
-vehicles :: AuthInfo -> IO (Map Text Text)
+vehicles :: MonadIO m => AuthInfo -> m (Map Text Text)
 vehicles ai = do
-  r <- asJSON =<< getWith (authOpts ai) vehiclesURL :: IO (Response Value)
+  r <- liftIO (asJSON =<< getWith (authOpts ai) vehiclesURL :: IO (Response Value))
   let vals = r ^.. responseBody . key "response" . values . key "id_s" . _String
       keys = r ^.. responseBody . key "response" . values . key "display_name" . _String
   pure (Map.fromList $ zip keys vals)

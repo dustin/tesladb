@@ -18,7 +18,7 @@ import           Tesla.Car
 type CommandResponse = Either Text ()
 
 -- | Run a command with a payload.
-runCmd :: Postable p => String -> p -> Car CommandResponse
+runCmd :: (MonadIO m, Postable p) => String -> p -> Car m CommandResponse
 runCmd cmd p = do
   a <- authInfo
   v <- vehicleID
@@ -28,6 +28,6 @@ runCmd cmd p = do
     _ -> Left $ r ^. responseBody . key "response" . key "reason" . _String
 
 -- | run command without a payload
-runCmd' :: String -> Car CommandResponse
+runCmd' :: MonadIO m => String -> Car m CommandResponse
 runCmd' cmd = runCmd cmd emptyPost
   where emptyPost = "" :: BL.ByteString

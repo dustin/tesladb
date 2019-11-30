@@ -41,8 +41,10 @@ dependencies:
 - mtl
 - transformers
 - unliftio
+- unliftio-core
 - vector
 - exceptions
+- monad-logger
 
 library:
   source-dirs: src

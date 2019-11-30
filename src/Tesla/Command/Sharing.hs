@@ -9,7 +9,7 @@ import           Data.Time.Clock.POSIX  (getCurrentTime, utcTimeToPOSIXSeconds)
 
 import           Tesla.Command
 
-share :: Text -> Car CommandResponse
+share :: MonadIO m => Text -> Car m CommandResponse
 share to = do
   now <- fst . properFraction . utcTimeToPOSIXSeconds <$> liftIO getCurrentTime
   runCmd "share" $ object [

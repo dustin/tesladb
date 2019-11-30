@@ -16,6 +16,11 @@ import           Control.Monad.Catch        (Exception, Handler (..),
                                              MonadCatch, SomeException (..),
                                              bracket, catches, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad.IO.Unlift    (withRunInIO)
+import           Control.Monad.Logger       (LogLevel (..), LoggingT,
+                                             MonadLogger, filterLogger,
+                                             logDebugN, logErrorN, logInfoN,
+                                             runStdoutLoggingT)
 import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
@@ -33,15 +38,11 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              option, progDesc, short,
                                              showDefault, strOption, switch,
                                              value, (<**>))
-import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
-                                             errorM, infoM, rootLoggerName,
-                                             setLevel, updateGlobalLogger)
 import           Text.Read                  (readMaybe)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
 import           Tesla.Car
-import           Tesla.Command
 import qualified Tesla.Command.Alerts       as CMD
 import qualified Tesla.Command.Charging     as CMD
 import qualified Tesla.Command.Climate      as CMD
@@ -67,7 +68,7 @@ data SinkEnv = SinkEnv {
   _sink_chan    :: TChan VehicleData
   }
 
-type Sink = ReaderT SinkEnv IO
+type Sink = LoggingT (ReaderT SinkEnv IO)
 
 options :: Parser Options
 options = Options
@@ -84,26 +85,31 @@ newtype DeathException = Die String deriving(Eq, Show)
 
 instance Exception DeathException
 
-logErr :: MonadIO m => String -> m ()
-logErr = liftIO . errorM rootLoggerName
+-- monadLoggerLog :: ToLogStr msg => Loc -> LogSource -> LogLevel -> msg -> m ()
 
-logInfo :: MonadIO m => String -> m ()
-logInfo = liftIO . infoM rootLoggerName
+logErr :: MonadLogger m => Text -> m ()
+logErr = logErrorN
 
-logDbg :: MonadIO m => String -> m ()
-logDbg = liftIO . debugM rootLoggerName
+logInfo :: MonadLogger m => Text -> m ()
+logInfo = logInfoN
 
-excLoop :: String -> Sink () -> Sink ()
+logDbg :: MonadLogger m => Text -> m ()
+logDbg = logDebugN
+
+tshow :: Show a => a -> Text
+tshow = T.pack . show
+
+excLoop :: Text -> Sink () -> Sink ()
 excLoop n s = do
   forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
   where
-    cancelHandler :: (MonadCatch m, MonadIO m) => AsyncCancelled -> m ()
+    cancelHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => AsyncCancelled -> m ()
     cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwM e
 
-    otherHandler :: (MonadCatch m, MonadIO m) => SomeException -> m ()
+    otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
     otherHandler e = do
-      logErr $ mconcat ["Caught exception in handler: ", n, " - ", show e, " retrying shortly"]
+      logErr $ mconcat ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
       sleep 5000000
 
 watchdogSink :: Sink ()
@@ -111,7 +117,7 @@ watchdogSink = do
   ch <- asks _sink_chan
   tov <- liftIO $ registerDelay (3*600000000)
   again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
-  logDbg $ "Watchdog returned " <> show again
+  logDbg $ "Watchdog returned " <> tshow again
   unless again $ liftIO $ die "Watchdog timeout"
   watchdogSink
 
@@ -150,36 +156,36 @@ mqttSink :: Sink ()
 mqttSink = do
   opts@Options{optDBPath} <- asks _sink_options
   ch <- asks _sink_chan
-  liftIO $ withConnection optDBPath (\db -> (withMQTT db opts) (store opts ch))
+  withRunInIO $ \unl -> withConnection optDBPath (\db -> (withMQTT db opts unl) (store opts ch unl))
 
   where
-    withMQTT db opts = bracket (connect db opts) (disco opts)
+    withMQTT db opts unl = bracket (connect db opts unl) (disco opts unl)
 
-    connect db opts@Options{..} = do
-      logInfo $ mconcat ["Connecting to ", show optMQTTURI]
+    connect db opts@Options{..} unl = do
+      unl . logInfo $ mconcat ["Connecting to ", tshow optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50,
-                                  _msgCB=SimpleCallback (tdbAPI opts db)} optMQTTURI
+                                  _msgCB=SimpleCallback (tdbAPI opts db unl)} optMQTTURI
       props <- svrProps mc
-      logInfo $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
+      unl . logInfo $ mconcat ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
       subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
-      logInfo $ mconcat ["MQTT sub response: ", show subr]
+      unl . logInfo $ mconcat ["MQTT sub response: ", tshow subr]
       pure mc
 
-    disco Options{optMQTTURI} c = do
-      logErr ("disconnecting from " <> show optMQTTURI)
+    disco Options{optMQTTURI} unl c = do
+      void . unl . logErr $ "disconnecting from " <> tshow optMQTTURI
       normalDisconnect c
-      logInfo ("disconnected from " <> show optMQTTURI)
+      void . unl . logInfo $ "disconnected from " <> tshow optMQTTURI
 
-    store Options{..} ch mc = forever $ do
+    store Options{..} ch unl mc = forever $ do
       vdata <- atomically $ do
         connd <- isConnectedSTM mc
         unless connd $ throwM DisconnectedException
         readTChan ch
-      logDbg "Delivering vdata via MQTT"
+      void . unl . logDbg $ "Delivering vdata via MQTT"
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
                                                 PropContentType "application/json"]
       unless (isUserPresent vdata) $ idiotCheck (openDoors vdata)
-      logDbg "Delivered vdata via MQTT"
+      void . unl . logDbg $ "Delivered vdata via MQTT"
 
         -- idiotCheck == verify state when user not present
         where idiotCheck [] = pure ()
@@ -188,7 +194,7 @@ mqttSink = do
                                         <> (BC.pack . show) ds) False QoS2 []
 
 
-    tdbAPI Options{..} db mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
+    tdbAPI Options{..} db unl mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
 
       where
         cmd = T.stripPrefix (T.dropWhileEnd (== '#') optInTopic)
@@ -207,16 +213,14 @@ mqttSink = do
         respond "" _  _ = pure ()
         respond rt rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
-        callCMD :: Text -> Car CommandResponse -> IO ()
-        callCMD rt a = runNamedCar optVName (loadAuthInfo optDBPath) $ do
+        callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
           logInfo $ mconcat ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
-          logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", show r]
+          logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", tshow r]
           respond rt (res r) []
-            where cmdname = T.unpack . fromJust . cmd $ t
+            where cmdname = fromJust . cmd $ t
                   res = either textToBL (const "")
 
-        callDBL :: Text -> BC.ByteString -> ((Double,Double) -> Car CommandResponse) -> IO ()
         callDBL res x a = case readTwo x of
                             Just ts -> callCMD res $ a ts
                             Nothing -> respond res "Could not parse arguments (expected two double values)" []
@@ -263,38 +267,37 @@ mqttSink = do
 
         -- All RPCs below require a response topic.
 
-        call p "" _ = logInfo $ mconcat ["request to ", show p, " with no response topic"]
+        call p "" _ = unl . logInfo $ mconcat ["request to ", tshow p, " with no response topic"]
 
         call "days" res _ = do
-          logInfo $ mconcat ["Days call responding to ", show res]
+          unl . logInfo $ mconcat ["Days call responding to ", tshow res]
           days <- listDays db
           respond res (encode . Map.fromList $ days) [PropContentType "application/json"]
 
         call "day" res d = do
-          logInfo $ mconcat ["Day call for ", show d, " responding to ", show res]
+          unl . logInfo $ mconcat ["Day call for ", tshow d, " responding to ", tshow res]
           days <- listDay db (BC.unpack d)
           respond res (encode days) [PropContentType "application/json"]
 
         call "fetch" res tss = do
-          logInfo $ mconcat ["Fetch call for ", show tss, " responding to ", show res]
+          unl . logInfo $ mconcat ["Fetch call for ", tshow tss, " responding to ", tshow res]
           let mts = decode ("\"" <> tss <> "\"")
           guard $ isJust mts
           vdata <- fetchDatum db (fromJust mts)
           respond res vdata [PropContentType "application/json"]
 
-        call x _ _ = logInfo $ mconcat ["Call to invalid path: ", show x]
+        call x _ _ = unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
 
 sleep :: MonadIO m => Int -> m ()
 sleep = liftIO . threadDelay
 
-gather :: Options -> TChan VehicleData -> IO ()
-gather Options{..} ch = do
-  runNamedCar optVName (loadAuthInfo optDBPath) $ do
+gather :: Options -> TChan VehicleData -> LoggingT IO ()
+gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- vehicleID
-    logInfo $ mconcat ["Looping with vid: ", show vid]
+    logInfo $ mconcat ["Looping with vid: ", tshow vid]
 
     forever $ do
-      logDbg "Fetching"
+      logDbg $ "Fetching"
       vdata <- timeout 10000000 vehicleData
       nt <- process (T.pack vid) vdata
       sleep nt
@@ -306,30 +309,29 @@ gather Options{..} ch = do
           | isCharging vdata    = 300000000
           | otherwise           = 600000000
 
-    process :: MonadIO m => Text -> Maybe VehicleData -> m Int
+    process :: (MonadLogger m, MonadIO m) => Text -> Maybe VehicleData -> m Int
     process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60000000
     process vid (Just vdata) = do
-      logInfo $ mconcat ["Fetched data for vid: ", show vid]
+      logInfo $ mconcat ["Fetched data for vid: ", tshow vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
-      logInfo $ mconcat ["Sleeping for ", show nt,
-                                      " user present: ", show $ isUserPresent vdata,
-                                      ", charging: ", show $ isCharging vdata]
-      pure $ naptime vdata
+      logInfo $ mconcat ["Sleeping for ", tshow nt,
+                                      " user present: ", tshow $ isUserPresent vdata,
+                                      ", charging: ", tshow $ isCharging vdata]
+      pure nt
 
 raceABunch_ :: [IO a] -> IO ()
 raceABunch_ is = traverse async is >>= void.waitAnyCancel
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = do
-  updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
-
   tch <- newBroadcastTChanIO
   let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
-  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+  race_ (runStdoutLoggingT . logfilt $ gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where d ch = atomically $ dupTChan ch
-        runSink f ch = runReaderT f (SinkEnv opts ch)
+        runSink f ch = runReaderT (runStdoutLoggingT . logfilt $ f) (SinkEnv opts ch)
+        logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
 
 main :: IO ()
 main = run =<< execParser opts

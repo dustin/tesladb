@@ -4,15 +4,16 @@ module Tesla.Command.Windows (
   ventWindows, closeWindows
   ) where
 
-import           Data.Text     (Text)
-import           Network.Wreq  (FormParam (..))
+import           Control.Monad.IO.Class (MonadIO (..))
+import           Data.Text              (Text)
+import           Network.Wreq           (FormParam (..))
 import           Tesla.Command
 
-windowControl :: Text -> (Double, Double) -> Car CommandResponse
+windowControl :: MonadIO m => Text -> (Double, Double) -> Car m CommandResponse
 windowControl x (lat,lon) = runCmd "window_control" [ "command" := x, "lat" := lat, "lon" := lon]
 
-ventWindows :: Car CommandResponse
+ventWindows :: MonadIO m => Car m CommandResponse
 ventWindows = windowControl "vent" (0,0)
 
-closeWindows :: (Double, Double) -> Car CommandResponse
+closeWindows :: MonadIO m => (Double, Double) -> Car m CommandResponse
 closeWindows = windowControl "close"
