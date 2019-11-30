@@ -327,11 +327,13 @@ run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = do
   tch <- newBroadcastTChanIO
   let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
-  race_ (runStdoutLoggingT . logfilt $ gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+  race_ (withLog $ gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where d ch = atomically $ dupTChan ch
-        runSink f ch = runReaderT (runStdoutLoggingT . logfilt $ f) (SinkEnv opts ch)
+        runSink f ch = runReaderT (withLog f) (SinkEnv opts ch)
         logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
+        withLog :: MonadIO m => LoggingT m a -> m a
+        withLog = runStdoutLoggingT . logfilt
 
 main :: IO ()
 main = run =<< execParser opts
