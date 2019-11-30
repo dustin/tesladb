@@ -41,6 +41,7 @@ import           UnliftIO.Timeout           (timeout)
 import           Tesla.AuthDB
 import           Tesla.Car
 import           Tesla.Command
+import qualified Tesla.Command.Alerts       as CMD
 import qualified Tesla.Command.Charging     as CMD
 import qualified Tesla.Command.Climate      as CMD
 import qualified Tesla.Command.Sharing      as CMD
@@ -222,6 +223,9 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "cmd/hvac/seat/rearleft" res x   = doSeat res CMD.RearLeftSeat x
         call "cmd/hvac/seat/rearcenter" res x = doSeat res CMD.RearCenterSeat x
         call "cmd/hvac/seat/rearright" res x  = doSeat res CMD.RearRightSeat x
+
+        call "cmd/alerts/honk" res _ = callCMD res CMD.honkHorn
+        call "cmd/alerts/flash" res _ = callCMD res CMD.flashLights
 
         call "cmd/hvac/temps" res x =
           case temps of
