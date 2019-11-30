@@ -200,6 +200,9 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
             where cmdname = T.unpack . fromJust . cmd $ t
                   res = either textToBL (const "")
 
+        doSeat res seat level = callCMD res $ CMD.heatSeat seat d
+          where d = fromMaybe 0 (readMaybe . BC.unpack $ level)
+
         call "cmd/sw/schedule" res x = callCMD res $ CMD.schedule d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
 
@@ -213,7 +216,13 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "cmd/hvac/on" res _ = callCMD res CMD.hvacOn
         call "cmd/hvac/off" res _ = callCMD res CMD.hvacOff
         call "cmd/hvac/wheel" res x = callCMD res $ CMD.wheelHeater (x == "on")
-        -- TODO: seats and temps.  Have to think of how I want to express these.
+
+        call "cmd/hvac/seat/driver" res x     = doSeat res CMD.DriverSeat x
+        call "cmd/hvac/seat/passenger" res x  = doSeat res CMD.PassengerSeat x
+        call "cmd/hvac/seat/rearleft" res x   = doSeat res CMD.RearLeftSeat x
+        call "cmd/hvac/seat/rearcenter" res x = doSeat res CMD.RearCenterSeat x
+        call "cmd/hvac/seat/rearright" res x  = doSeat res CMD.RearRightSeat x
+        -- TODO: temps.  Have to think of how I want to express these.
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
 
