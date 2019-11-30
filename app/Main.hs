@@ -44,6 +44,7 @@ import           Tesla.Command
 import qualified Tesla.Command.Alerts       as CMD
 import qualified Tesla.Command.Charging     as CMD
 import qualified Tesla.Command.Climate      as CMD
+import qualified Tesla.Command.Homelink     as CMD
 import qualified Tesla.Command.Sharing      as CMD
 import qualified Tesla.Command.Software     as CMD
 import           Tesla.DB
@@ -204,6 +205,10 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         doSeat res seat level = callCMD res $ CMD.heatSeat seat d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ level)
 
+        readTwo x = case (traverse readMaybe (words . BC.unpack $ x)) of
+                      (Just [a,b]) -> Just (a,b)
+                      _            -> Nothing
+
         call "cmd/sw/schedule" res x = callCMD res $ CMD.schedule d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
 
@@ -228,16 +233,17 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "cmd/alerts/flash" res _ = callCMD res CMD.flashLights
 
         call "cmd/hvac/temps" res x =
-          case temps of
+          case readTwo x of
             Just ts -> callCMD res $ CMD.setTemps ts
             Nothing -> respond res "Could not parse temperatures" []
 
-            where
-              temps = case (traverse readMaybe (words . BC.unpack $ x)) of
-                        (Just [a,b]) -> Just (a,b)
-                        _            -> Nothing
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
+
+        call "cmd/homelink/trigger" res x =
+          case readTwo x of
+            Just loc -> callCMD res $ CMD.trigger loc
+            Nothing  -> respond res "failed to parse location" []
 
         -- All RPCs below require a response topic.
 
