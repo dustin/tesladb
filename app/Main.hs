@@ -20,7 +20,7 @@ import           Control.Monad.IO.Unlift    (withRunInIO)
 import           Control.Monad.Logger       (LogLevel (..), LoggingT,
                                              MonadLogger, filterLogger,
                                              logDebugN, logErrorN, logInfoN,
-                                             runStdoutLoggingT)
+                                             runStderrLoggingT)
 import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
@@ -333,7 +333,7 @@ run opts@Options{optNoMQTT, optVerbose} = do
         runSink f ch = runReaderT (withLog f) (SinkEnv opts ch)
         logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
         withLog :: MonadIO m => LoggingT m a -> m a
-        withLog = runStdoutLoggingT . logfilt
+        withLog = runStderrLoggingT . logfilt
 
 main :: IO ()
 main = run =<< execParser opts
