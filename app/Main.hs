@@ -11,11 +11,12 @@ import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
                                              newBroadcastTChanIO, orElse,
                                              readTChan, readTVar, registerDelay,
                                              retry, writeTChan)
-import           Control.Exception          (Exception, Handler (..),
-                                             SomeException (..), bracket,
-                                             catches, throw, throwIO)
 import           Control.Monad              (forever, guard, unless, void)
+import           Control.Monad.Catch        (Exception, Handler (..),
+                                             MonadCatch, SomeException (..),
+                                             bracket, catches, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -61,6 +62,13 @@ data Options = Options {
   , optCMDsEnabled :: Bool
   }
 
+data SinkEnv = SinkEnv {
+  _sink_options :: Options,
+  _sink_chan    :: TChan VehicleData
+  }
+
+type Sink = ReaderT SinkEnv IO
+
 options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
@@ -71,8 +79,6 @@ options = Options
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
   <*> switch (long "enable-commands" <> help "enable remote commands")
-
-type Sink = Options -> TChan VehicleData -> IO ()
 
 newtype DeathException = Die String deriving(Eq, Show)
 
@@ -87,26 +93,27 @@ logInfo = liftIO . infoM rootLoggerName
 logDbg :: MonadIO m => String -> m ()
 logDbg = liftIO . debugM rootLoggerName
 
-excLoop :: String -> Sink -> Options -> TChan VehicleData  -> IO ()
-excLoop n s opts ch = forever $ catches (s opts ch) [Handler cancelHandler,
-                                                     Handler otherHandler]
+excLoop :: String -> Sink () -> Sink ()
+excLoop n s = do
+  forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
   where
-    cancelHandler :: AsyncCancelled -> IO ()
-    cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwIO e
+    cancelHandler :: (MonadCatch m, MonadIO m) => AsyncCancelled -> m ()
+    cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwM e
 
-    otherHandler :: SomeException -> IO ()
+    otherHandler :: (MonadCatch m, MonadIO m) => SomeException -> m ()
     otherHandler e = do
       logErr $ mconcat ["Caught exception in handler: ", n, " - ", show e, " retrying shortly"]
-      threadDelay 5000000
+      sleep 5000000
 
-watchdogSink :: Sink
-watchdogSink o ch = do
-  tov <- registerDelay (3*600000000)
-  again <- atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
+watchdogSink :: Sink ()
+watchdogSink = do
+  ch <- asks _sink_chan
+  tov <- liftIO $ registerDelay (3*600000000)
+  again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
   logDbg $ "Watchdog returned " <> show again
-  unless again $ die "Watchdog timeout"
-  watchdogSink o ch
+  unless again $ liftIO $ die "Watchdog timeout"
+  watchdogSink
 
     where
       checkTimeout v = do
@@ -114,11 +121,14 @@ watchdogSink o ch = do
         unless v' retry
         pure False
 
-dbSink :: Sink
-dbSink Options{..} ch = withConnection optDBPath storeThings
+dbSink :: Sink ()
+dbSink = do
+  Options{optDBPath} <- asks _sink_options
+  ch <- asks _sink_chan
+  liftIO $ withConnection optDBPath (storeThings ch)
 
   where
-    storeThings db = do
+    storeThings ch db = do
       dbInit db
 
       forever $ atomically (readTChan ch) >>= insertVData db
@@ -134,33 +144,36 @@ textToBL :: Text -> BL.ByteString
 textToBL = BL.fromStrict . TE.encodeUtf8
 
 die :: String -> IO ()
-die = throwIO . Die
+die = throwM . Die
 
-mqttSink :: Sink
-mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
+mqttSink :: Sink ()
+mqttSink = do
+  opts@Options{optDBPath} <- asks _sink_options
+  ch <- asks _sink_chan
+  liftIO $ withConnection optDBPath (\db -> (withMQTT db opts) (store opts ch))
 
   where
-    withMQTT db = bracket (connect db) disco
+    withMQTT db opts = bracket (connect db opts) (disco opts)
 
-    connect db = do
+    connect db opts@Options{..} = do
       logInfo $ mconcat ["Connecting to ", show optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50,
-                                  _msgCB=SimpleCallback (tdbAPI db)} optMQTTURI
+                                  _msgCB=SimpleCallback (tdbAPI opts db)} optMQTTURI
       props <- svrProps mc
       logInfo $ mconcat ["MQTT conn props from ", show optMQTTURI, ": ", show props]
       subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
       logInfo $ mconcat ["MQTT sub response: ", show subr]
       pure mc
 
-    disco c = do
+    disco Options{optMQTTURI} c = do
       logErr ("disconnecting from " <> show optMQTTURI)
       normalDisconnect c
       logInfo ("disconnected from " <> show optMQTTURI)
 
-    store mc = forever $ do
+    store Options{..} ch mc = forever $ do
       vdata <- atomically $ do
         connd <- isConnectedSTM mc
-        unless connd $ throw DisconnectedException
+        unless connd $ throwM DisconnectedException
         readTChan ch
       logDbg "Delivering vdata via MQTT"
       publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
@@ -175,7 +188,7 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
                                         <> (BC.pack . show) ds) False QoS2 []
 
 
-    tdbAPI db mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
+    tdbAPI Options{..} db mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
 
       where
         cmd = T.stripPrefix (T.dropWhileEnd (== '#') optInTopic)
@@ -313,9 +326,10 @@ run opts@Options{optNoMQTT, optVerbose} = do
 
   tch <- newBroadcastTChanIO
   let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
-  race_ (gather opts tch) (raceABunch_ ((\f -> f opts =<< d tch) <$> sinks))
+  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where d ch = atomically $ dupTChan ch
+        runSink f ch = runReaderT f (SinkEnv opts ch)
 
 main :: IO ()
 main = run =<< execParser opts

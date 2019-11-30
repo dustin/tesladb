@@ -42,6 +42,7 @@ dependencies:
 - transformers
 - unliftio
 - vector
+- exceptions
 
 library:
   source-dirs: src
