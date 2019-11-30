@@ -222,7 +222,16 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
         call "cmd/hvac/seat/rearleft" res x   = doSeat res CMD.RearLeftSeat x
         call "cmd/hvac/seat/rearcenter" res x = doSeat res CMD.RearCenterSeat x
         call "cmd/hvac/seat/rearright" res x  = doSeat res CMD.RearRightSeat x
-        -- TODO: temps.  Have to think of how I want to express these.
+
+        call "cmd/hvac/temps" res x =
+          case temps of
+            Just ts -> callCMD res $ CMD.setTemps ts
+            Nothing -> respond res "Could not parse temperatures" []
+
+            where
+              temps = case (traverse readMaybe (words . BC.unpack $ x)) of
+                        (Just [a,b]) -> Just (a,b)
+                        _            -> Nothing
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
 
