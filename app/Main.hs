@@ -47,6 +47,7 @@ import qualified Tesla.Command.Climate      as CMD
 import qualified Tesla.Command.Homelink     as CMD
 import qualified Tesla.Command.Sharing      as CMD
 import qualified Tesla.Command.Software     as CMD
+import qualified Tesla.Command.Windows      as CMD
 import           Tesla.DB
 
 data Options = Options {
@@ -239,6 +240,12 @@ mqttSink Options{..} ch = withConnection optDBPath (\db -> (withMQTT db) store)
 
 
         call "cmd/share" res x = callCMD res $ CMD.share (blToText x)
+
+        call "cmd/windows/vent" res _ = callCMD res CMD.ventWindows
+        call "cmd/windows/close" res x =
+          case readTwo x of
+            Just loc -> callCMD res $ CMD.closeWindows loc
+            Nothing  -> respond res "failed to parse location" []
 
         call "cmd/homelink/trigger" res x =
           case readTwo x of
