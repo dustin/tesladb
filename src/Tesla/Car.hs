@@ -94,7 +94,7 @@ maybeTeslaTS b = pt <$> mv
         pt x = posixSecondsToUTCTime . fromRational $ x % 1000
 
 teslaTS :: VehicleData -> UTCTime
-teslaTS b = maybe (error . show $ b) id . maybeTeslaTS $ b
+teslaTS b = fromMaybe (error . show $ b) . maybeTeslaTS $ b
 
 data Door = DriverFront
           | DriverRear
@@ -129,7 +129,7 @@ doors b = traverse ds $ zip ["df", "dr", "pf", "pr", "ft", "rt"] [minBound..]
     c d _ = Open   d
 
 openDoors :: VehicleData -> [Door]
-openDoors b = fromMaybe [] $ (map fromOpenState . filter isOpen <$> doors b)
+openDoors b = maybe [] (map fromOpenState . filter isOpen) (doors b)
 
 data Location = Location { _lat :: Double, _lon :: Double } deriving (Show, Generic)
 

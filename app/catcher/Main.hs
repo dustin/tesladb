@@ -65,7 +65,7 @@ options = Options
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
 
 logAt :: MonadLogger m => LogLevel -> Text -> m ()
-logAt l = logWithoutLoc "" l
+logAt = logWithoutLoc ""
 
 logErr :: MonadLogger m => Text -> m ()
 logErr = logAt LevelError
@@ -122,10 +122,10 @@ backfill db mc dtopic = do
 
     where
       remoteDays :: (MonadLogger m, MonadIO m) => m (Maybe (Map String Int))
-      remoteDays = decode <$> (liftIO $ MQTTRPC.call mc (topic "days") "")
+      remoteDays = decode <$> liftIO (MQTTRPC.call mc (topic "days") "")
 
-      remoteDay :: (MonadLogger m, MonadIO m) => BL.ByteString -> m (Maybe (Set (UTCTime)))
-      remoteDay d = decode <$> (liftIO $ MQTTRPC.call mc (topic "day") d)
+      remoteDay :: (MonadLogger m, MonadIO m) => BL.ByteString -> m (Maybe (Set UTCTime))
+      remoteDay d = decode <$> liftIO (MQTTRPC.call mc (topic "day") d)
 
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
@@ -148,7 +148,7 @@ backfill db mc dtopic = do
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
 run :: Options -> IO ()
-run opts@Options{..} = runStderrLoggingT . logfilt $ do
+run opts@Options{..} = runStderrLoggingT . logfilt $
   withRunInIO $ \unl -> withConnection optDBPath (storeThings unl)
 
   where

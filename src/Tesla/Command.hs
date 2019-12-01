@@ -23,7 +23,7 @@ runCmd cmd p = do
   a <- authInfo
   v <- vehicleID
   r <- liftIO (asJSON =<< postWith (authOpts a) (vehicleURL v $ "command/" <> cmd) p :: IO (Response Value))
-  pure $ case (r ^? responseBody . key "response" . key "result" . _Bool) of
+  pure $ case r ^? responseBody . key "response" . key "result" . _Bool of
     Just True  -> Right ()
     _ -> Left $ r ^. responseBody . key "response" . key "reason" . _String
 

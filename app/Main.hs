@@ -98,8 +98,7 @@ tshow :: Show a => a -> Text
 tshow = T.pack . show
 
 excLoop :: Text -> Sink () -> Sink ()
-excLoop n s = do
-  forever $ catches s [Handler cancelHandler, Handler otherHandler]
+excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
   where
     cancelHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => AsyncCancelled -> m ()
@@ -154,7 +153,7 @@ mqttSink :: Sink ()
 mqttSink = do
   opts@Options{optDBPath} <- asks _sink_options
   ch <- asks _sink_chan
-  withRunInIO $ \unl -> withConnection optDBPath (\db -> (withMQTT db opts unl) (store opts ch unl))
+  withRunInIO $ \unl -> withConnection optDBPath (\db -> withMQTT db opts unl (store opts ch unl))
 
   where
     withMQTT db opts unl = bracket (connect db opts unl) (disco opts unl)
@@ -203,9 +202,9 @@ mqttSink = do
 
         rprops = filter f props
           where
-            f (PropCorrelationData{}) = True
-            f (PropUserProperty{})    = True
-            f _                       = False
+            f PropCorrelationData{} = True
+            f PropUserProperty{}    = True
+            f _                     = False
 
         respond :: MonadIO m => Text -> BL.ByteString -> [Property] -> m ()
         respond "" _  _ = pure ()
@@ -227,7 +226,7 @@ mqttSink = do
         doSeat res seat level = callCMD res $ CMD.heatSeat seat d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ level)
 
-        readTwo x = case (traverse readMaybe (words . BC.unpack $ x)) of
+        readTwo x = case traverse readMaybe (words . BC.unpack $ x) of
                       (Just [a,b]) -> Just (a,b)
                       _            -> Nothing
 

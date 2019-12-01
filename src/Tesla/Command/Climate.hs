@@ -33,8 +33,7 @@ data Seat = DriverSeat | PassengerSeat | RearLeftSeat | RearCenterSeat | RearRig
 
 -- | Set heating levels for various seats.
 heatSeat :: MonadIO m => Seat -> Int -> Car m CommandResponse
-heatSeat seat level = do
-  runCmd "remote_seat_heater_request" ["heater" := seatNum seat, "level" := level]
+heatSeat seat level = runCmd "remote_seat_heater_request" ["heater" := seatNum seat, "level" := level]
   where
     seatNum :: Seat -> Int
     seatNum DriverSeat     = 0
@@ -45,6 +44,5 @@ heatSeat seat level = do
 
 -- | Set the main HVAC temperatures.
 setTemps :: MonadIO m => (Double, Double) -> Car m CommandResponse
-setTemps (driver, passenger) = do
-  runCmd "set_temps" ["driver_temp" := driver, "passenger_temp" := passenger]
+setTemps (driver, passenger) = runCmd "set_temps" ["driver_temp" := driver, "passenger_temp" := passenger]
 
