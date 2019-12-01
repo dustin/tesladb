@@ -29,5 +29,4 @@ runCmd cmd p = do
 
 -- | run command without a payload
 runCmd' :: MonadIO m => String -> Car m CommandResponse
-runCmd' cmd = runCmd cmd emptyPost
-  where emptyPost = "" :: BL.ByteString
+runCmd' cmd = runCmd cmd BL.empty
