@@ -108,7 +108,7 @@ excLoop n s = do
     otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
     otherHandler e = do
       logErr $ mconcat ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
-      sleep 5000000
+      sleep 5
 
 watchdogSink :: Sink ()
 watchdogSink = do
@@ -287,7 +287,10 @@ mqttSink = do
         call x _ _ = unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
 
 sleep :: MonadIO m => Int -> m ()
-sleep = liftIO . threadDelay
+sleep = liftIO . threadDelay . seconds
+
+seconds :: Int -> Int
+seconds = (* 1000000)
 
 gather :: Options -> TChan VehicleData -> LoggingT IO ()
 gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
@@ -295,27 +298,26 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     logInfo $ mconcat ["Looping with vid: ", tshow vid]
 
     forever $ do
-      logDbg $ "Fetching"
-      vdata <- timeout 10000000 vehicleData
-      nt <- process (T.pack vid) vdata
-      sleep nt
+      logDbg "Fetching"
+      vdata <- timeout (seconds 10) vehicleData
+      sleep =<< process (T.pack vid) vdata
 
   where
     naptime :: VehicleData -> Int
     naptime vdata
-          | isUserPresent vdata = 60000000
-          | isCharging vdata    = 300000000
-          | otherwise           = 600000000
+          | isUserPresent vdata =  60
+          | isCharging vdata    = 300
+          | otherwise           = 600
 
     process :: (MonadLogger m, MonadIO m) => Text -> Maybe VehicleData -> m Int
-    process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60000000
+    process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60
     process vid (Just vdata) = do
       logInfo $ mconcat ["Fetched data for vid: ", tshow vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
       logInfo $ mconcat ["Sleeping for ", tshow nt,
-                                      " user present: ", tshow $ isUserPresent vdata,
-                                      ", charging: ", tshow $ isCharging vdata]
+                         " user present: ", tshow $ isUserPresent vdata,
+                         ", charging: ", tshow $ isCharging vdata]
       pure nt
 
 raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
