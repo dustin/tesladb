@@ -85,8 +85,6 @@ newtype DeathException = Die String deriving(Eq, Show)
 
 instance Exception DeathException
 
--- monadLoggerLog :: ToLogStr msg => Loc -> LogSource -> LogLevel -> msg -> m ()
-
 logErr :: MonadLogger m => Text -> m ()
 logErr = logErrorN
 

@@ -3,10 +3,14 @@
 
 module Main where
 
-import           Control.Concurrent.Async   (concurrently, mapConcurrently_)
-import qualified Control.Exception          as E
 import           Control.Monad              (unless, (<=<))
+import qualified Control.Monad.Catch        as E
+import           Control.Monad.Fail         (MonadFail)
 import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
+import           Control.Monad.Logger       (LogLevel (..), MonadLogger,
+                                             filterLogger, logWithoutLoc,
+                                             runStderrLoggingT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -16,7 +20,7 @@ import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust)
 import           Data.Set                   (Set)
 import qualified Data.Set                   as Set
-import           Data.Text                  (Text, dropWhileEnd)
+import           Data.Text                  (Text, dropWhileEnd, pack)
 import qualified Data.Text.Encoding         as TE
 import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
@@ -32,9 +36,7 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              maybeReader, option, progDesc,
                                              short, showDefault, strOption,
                                              switch, value, (<**>))
-import           System.Log.Logger          (Priority (DEBUG, INFO), debugM,
-                                             errorM, infoM, rootLoggerName,
-                                             setLevel, updateGlobalLogger)
+import           UnliftIO.Async             (concurrently, mapConcurrently_)
 
 import           Tesla.Car
 import           Tesla.DB
@@ -62,107 +64,115 @@ options = Options
   <*> switch (long "clean-session" <> help "Clean the MQTT session")
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
 
-logErr :: MonadIO m => String -> m ()
-logErr = liftIO . errorM rootLoggerName
+logAt :: MonadLogger m => LogLevel -> Text -> m ()
+logAt l = logWithoutLoc "" l
 
-logInfo :: MonadIO m => String -> m ()
-logInfo = liftIO . infoM rootLoggerName
+logErr :: MonadLogger m => Text -> m ()
+logErr = logAt LevelError
 
-logDbg :: MonadIO m => String -> m ()
-logDbg = liftIO . debugM rootLoggerName
+logInfo :: MonadLogger m => Text -> m ()
+logInfo = logAt LevelInfo
+
+logDbg :: MonadLogger m => Text -> m ()
+logDbg = logAt LevelDebug
+
+lstr :: Show a => a -> Text
+lstr = pack . show
 
 type Callback = MQTTClient -> Topic -> BL.ByteString -> [Property] -> IO ()
 
-withMQTT :: Options -> Callback -> (MQTTClient -> IO ()) -> IO ()
-withMQTT Options{..} cb = E.bracket conn normalDisconnect
+withMQTT :: (MonadIO m, E.MonadMask m, MonadLogger m) => Options -> Callback -> (MQTTClient -> m ()) -> m ()
+withMQTT Options{..} cb = E.bracket conn (liftIO . normalDisconnect)
   where
     conn = do
-      mc <- connectURI mqttConfig{_cleanSession=optSessionTime == 0,
-                                  _protocol=Protocol50,
-                                  _msgCB=SimpleCallback cb,
-                                  _connProps=[PropReceiveMaximum 65535,
-                                              PropSessionExpiryInterval optSessionTime,
-                                              PropTopicAliasMaximum 10,
-                                              PropRequestResponseInformation 1,
-                                              PropRequestProblemInformation 1]}
+      mc <- liftIO $ connectURI mqttConfig{_cleanSession=optSessionTime == 0,
+                                           _protocol=Protocol50,
+                                           _msgCB=SimpleCallback cb,
+                                           _connProps=[PropReceiveMaximum 65535,
+                                                       PropSessionExpiryInterval optSessionTime,
+                                                       PropTopicAliasMaximum 10,
+                                                       PropRequestResponseInformation 1,
+                                                       PropRequestProblemInformation 1]}
             optMQTTURI
-      ack <- connACK mc
-      logDbg $ mconcat ["MQTT connected: ", show ack]
+      ack <- liftIO $ connACK mc
+      logDbg $ mconcat ["MQTT connected: ", lstr ack]
       pure mc
 
-logData :: VehicleData -> IO ()
+logData :: (MonadIO m, MonadLogger m) => VehicleData -> m ()
 logData vd = unless (up || null od) $ logInfo $ mconcat [
-  "User is not present, but the following doors are open at ", show ts, ": ", show od]
+  "User is not present, but the following doors are open at ", lstr ts, ": ", lstr od]
   where
     up = isUserPresent vd
     od = openDoors vd
     ts = teslaTS vd
 
-tryInsert :: Connection -> VehicleData -> IO ()
-tryInsert db vd = E.catch (insertVData db vd)
-                  (\ex -> logErr $ mconcat ["Error on ", show . maybeTeslaTS $ vd, ": ",
-                                            show (ex :: SQLError)])
+tryInsert :: (MonadLogger m, E.MonadCatch m, MonadIO m) => Connection -> VehicleData -> m ()
+tryInsert db vd = E.catch (liftIO $ insertVData db vd)
+                  (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
+                                            lstr (ex :: SQLError)])
 
-backfill :: Connection -> MQTTClient -> Topic -> IO ()
+backfill :: (MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m) => Connection -> MQTTClient -> Topic -> m ()
 backfill db mc dtopic = do
-  logInfo $ "Beginning backfill"
-  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> listDays db)
+  logInfo "Beginning backfill"
+  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> liftIO (listDays db))
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
   traverse_ doDay dayDiff
-  logInfo $ "Backfill complete"
+  logInfo "Backfill complete"
 
     where
-      remoteDays :: IO (Maybe (Map String Int))
-      remoteDays = decode <$> MQTTRPC.call mc (topic "days") ""
+      remoteDays :: (MonadLogger m, MonadIO m) => m (Maybe (Map String Int))
+      remoteDays = decode <$> (liftIO $ MQTTRPC.call mc (topic "days") "")
 
-      remoteDay :: BL.ByteString -> IO (Maybe (Set (UTCTime)))
-      remoteDay d = decode <$> MQTTRPC.call mc (topic "day") d
+      remoteDay :: (MonadLogger m, MonadIO m) => BL.ByteString -> m (Maybe (Set (UTCTime)))
+      remoteDay d = decode <$> (liftIO $ MQTTRPC.call mc (topic "day") d)
 
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
-        logInfo $ mconcat ["Backfilling ", d]
-        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay db d)
+        logInfo $ mconcat ["Backfilling ", pack d]
+        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> liftIO (listDay db d))
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
-        logDbg $ mconcat ["missing: ", show missing]
-        logDbg $ mconcat ["extra: ", show extra]
+        logDbg $ mconcat ["missing: ", lstr missing]
+        logDbg $ mconcat ["extra: ", lstr extra]
 
         mapConcurrently_ doOne missing
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
-        logDbg $ mconcat ["Fetching remote data from ", show ts]
-        vd <- MQTTRPC.call mc (topic "fetch") k
+        logDbg $ mconcat ["Fetching remote data from ", lstr ts]
+        vd <- liftIO $ MQTTRPC.call mc (topic "fetch") k
         logData vd
         tryInsert db vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
 run :: Options -> IO ()
-run opts@Options{..} = do
-  updateGlobalLogger rootLoggerName (setLevel $ if optVerbose then DEBUG else INFO)
-
-  withConnection optDBPath storeThings
+run opts@Options{..} = runStderrLoggingT . logfilt $ do
+  withRunInIO $ \unl -> withConnection optDBPath (storeThings unl)
 
   where
-    sink db _ _ m _ = do
+    logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
+
+    sink db unl _ _ m _ = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
-      logDbg $ mconcat ["Received data ", formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
-      logData m
-      tryInsert db m
+      unl $ do
+        logDbg $ mconcat ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
+        logData m
+        tryInsert db m
 
-    storeThings db = do
+    storeThings unl db = do
       dbInit db
 
-      withMQTT opts (sink db) $ \mc -> do
-        subr <- subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2, _retainHandling=SendOnSubscribeNew})] mempty
-        logDbg $ mconcat ["Sub response: ", show subr]
+      unl $ withMQTT opts (sink db unl) $ \mc -> do
+        subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
+                                                                 _retainHandling=SendOnSubscribeNew})] []
+        logDbg $ mconcat ["Sub response: ", lstr subr]
 
         unless optNoBackfill $ backfill db mc optMQTTTopic
 
-        waitForClient mc
+        liftIO $ waitForClient mc
 
 main :: IO ()
 main = run =<< execParser opts

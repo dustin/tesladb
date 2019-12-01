@@ -31,7 +31,6 @@ dependencies:
 - http-client
 - containers
 - sqlite-simple
-- hslogger
 - optparse-applicative
 - network-uri
 - async
