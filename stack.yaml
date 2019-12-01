@@ -40,8 +40,7 @@ packages:
 extra-deps:
 - net-mqtt-0.6.2.1
 - net-mqtt-rpc-0.1.0.0
-- git: https://github.com/dustin/tesla.git
-  commit: 4381034d504f6de4d5034ca7c8332afc46d08943
+- tesla-0.1.0.0
 # - git: https://github.com/dustin/mqtt-hs.git
 #   commit: 28557ea2f3b0c2924da543d2dd7dbca450883a09
 
