@@ -44,6 +44,7 @@ dependencies:
 - vector
 - exceptions
 - monad-logger
+- tesla
 
 library:
   source-dirs: src
@@ -96,18 +97,3 @@ executables:
     - -Wall
     dependencies:
     - tesladb
-
-tests:
-  tesladb-test:
-    main:                Spec.hs
-    source-dirs:         test
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    dependencies:
-    - tesladb
-    - HUnit
-    - tasty
-    - tasty-hunit
-    - tasty-quickcheck

@@ -43,13 +43,7 @@ import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
 import           Tesla.Car
-import qualified Tesla.Command.Alerts       as CMD
-import qualified Tesla.Command.Charging     as CMD
-import qualified Tesla.Command.Climate      as CMD
-import qualified Tesla.Command.Homelink     as CMD
-import qualified Tesla.Command.Sharing      as CMD
-import qualified Tesla.Command.Software     as CMD
-import qualified Tesla.Command.Windows      as CMD
+import qualified Tesla.Commands             as CMD
 import           Tesla.DB
 
 data Options = Options {
@@ -230,10 +224,10 @@ mqttSink = do
                       (Just [a,b]) -> Just (a,b)
                       _            -> Nothing
 
-        call "cmd/sw/schedule" res x = callCMD res $ CMD.schedule d
+        call "cmd/sw/schedule" res x = callCMD res $ CMD.scheduleUpdate d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
 
-        call "cmd/sw/cancel" res _ = callCMD res CMD.cancel
+        call "cmd/sw/cancel" res _ = callCMD res CMD.cancelUpdate
 
         call "cmd/charging/start" res _ = callCMD res CMD.startCharging
         call "cmd/charging/stop" res _ = callCMD res CMD.stopCharging
@@ -294,12 +288,12 @@ seconds = (* 1000000)
 gather :: Options -> TChan VehicleData -> LoggingT IO ()
 gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- vehicleID
-    logInfo $ mconcat ["Looping with vid: ", tshow vid]
+    logInfo $ mconcat ["Looping with vid: ", vid]
 
     forever $ do
       logDbg "Fetching"
       vdata <- timeout (seconds 10) vehicleData
-      sleep =<< process (T.pack vid) vdata
+      sleep =<< process vid vdata
 
   where
     naptime :: VehicleData -> Int
@@ -311,7 +305,7 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     process :: (MonadLogger m, MonadIO m) => Text -> Maybe VehicleData -> m Int
     process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60
     process vid (Just vdata) = do
-      logInfo $ mconcat ["Fetched data for vid: ", tshow vid]
+      logInfo $ mconcat ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
       logInfo $ mconcat ["Sleeping for ", tshow nt,
