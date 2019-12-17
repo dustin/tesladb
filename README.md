@@ -12,3 +12,53 @@ Grafana or the like.
 This is a [Haskell stack tools](https://docs.haskellstack.org/) based
 project.  Given a working `stack`, one should be able to execute
 `stack build` which will fetch all of the dependencies and build.
+
+After building, you will have several executables.
+
+teslauth: Authenticates to Tesla's API (with your credentials) and
+stores them in a local database.  _For obvious reasons_ treat this
+carefully.
+
+teslacatcher: Drains an MQTT topic to a sqlite database.
+
+tesladb: Runs continuiously polling Tesla's API to write to a database
+and MQTT, by default.
+
+tesladbfix: Filters out fields that have bad timestamps to a table
+named "rejects" in the database.
+
+## Setup and Run
+
+The first thing you'll need to do is auth.  This runs once initially,
+then needs to be run once a day with the -r flag to refresh.
+
+```
+stack exec teslauth -- --email "teslalogin@provider.com" \
+--dbpath ~/var/tesla.db
+```
+
+After that, running tesladb itself is usually a matter of running the
+main command with arguments.
+
+```
+stack exec tesladb -- --vname "mycar" \
+--dbpath ~/var/tesladb.db \
+--mqtt-uri mqtts://user:pass@host/#tesladb \
+--mqtt-topic tesla/x/data \
+--listen-topic 'tesla/x/in/#' \
+--enable-commands -v +RTS -ls
+```
+
+One problem you'll probably run into is that you don't know your
+vehicle name to pass to `--vname`.  If you run the command without the
+vehicle name, it will introspect the Tesla API to give you a list of
+possible vehicles.
+
+This will run every 600s or so as long as the auth is valid.
+
+## What Does This Do?
+
+The resulting MQTT topics both receive telemetry and status as well as
+take input messages for car control.  Need to open your frunk?  Don't
+bother with the Tesla app, just craft an MQTT message to do it for
+you.  Imagine the automation possibilities.
