@@ -32,6 +32,7 @@ withEcho :: Bool -> IO a -> IO a
 withEcho echo action = do
   putStr "Enter password: " >> hFlush stdout
   old <- hGetEcho stdin
+  putStr "\n" >> hFlush stdout
   bracket_ (hSetEcho stdin echo) (hSetEcho stdin old) action
 
 getPass :: IO String
