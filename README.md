@@ -17,9 +17,12 @@ After building, you will have several executables.
 
 teslauth: Authenticates to Tesla's API (with your credentials) and
 stores them in a local database.  _For obvious reasons_ treat this
-carefully.
+carefully. It is fairly safe, however, in that it does not store
+credenials, but does store a token to a session from the password you
+initially supply.
 
-teslacatcher: Drains an MQTT topic to a sqlite database.
+teslacatcher: Drains an MQTT topic to a sqlite database.  This can
+also backfill missing data, effectively synchronizing state locally.
 
 tesladb: Runs continuiously polling Tesla's API to write to a database
 and MQTT, by default.
@@ -29,24 +32,35 @@ named "rejects" in the database.
 
 ## Setup and Run
 
+With Haskell `stack`, you can run the binaries from the source
+checkout using `stack exec`.  Alternatively use `stack install` to
+install to Stack's local bin directory.  Examples below are post install.
+
 The first thing you'll need to do is auth.  This runs once initially,
 then needs to be run once a day with the -r flag to refresh.
 
 ```
-stack exec teslauth -- --email "teslalogin@provider.com" \
+teslauth --email "myaddress@example.com" \
 --dbpath ~/var/tesla.db
+```
+
+Then, as mentioned, run approximately once per day (from cron or such
+which checks for `0` exit status)  to refresh the auth token as follows:
+
+```
+teslauth -r --dbpath ~/var/tesla.db
 ```
 
 After that, running tesladb itself is usually a matter of running the
 main command with arguments.
 
 ```
-stack exec tesladb -- --vname "mycar" \
+tesladb --vname "mycar" \
 --dbpath ~/var/tesladb.db \
 --mqtt-uri mqtts://user:pass@host/#tesladb \
 --mqtt-topic tesla/x/data \
 --listen-topic 'tesla/x/in/#' \
---enable-commands -v +RTS -ls
+--enable-commands -v
 ```
 
 One problem you'll probably run into is that you don't know your
@@ -54,7 +68,11 @@ vehicle name to pass to `--vname`.  If you run the command without the
 vehicle name, it will introspect the Tesla API to give you a list of
 possible vehicles.
 
-This will run every 600s or so as long as the auth is valid.
+This will run every 600s or so as long as the auth is valid and the
+API isn't returning errors.  The API _does_ tend to return errors
+regularly. If that is the case, just back off and run it again using
+whatever makes sense on your system to do such things (e.g. upstart,
+smf).
 
 ## What Does This Do?
 
