@@ -17,9 +17,9 @@ After building, you will have several executables.
 
 teslauth: Authenticates to Tesla's API (with your credentials) and
 stores them in a local database.  _For obvious reasons_ treat this
-carefully. It is fairly safe, however, in that it does not store
-credenials, but does store a token to a session from the password you
-initially supply.
+carefully.  While it doesn't store your actual Tesla account password,
+it does have credentials allowing access to your Tesla account
+(including things like reading your car state or honking you horn).
 
 teslacatcher: Drains an MQTT topic to a sqlite database.  This can
 also backfill missing data, effectively synchronizing state locally.
