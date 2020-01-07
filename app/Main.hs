@@ -277,7 +277,9 @@ mqttSink = do
           vdata <- fetchDatum db (fromJust mts)
           respond res vdata [PropContentType "application/json"]
 
-        call x _ _ = unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
+        call x res _ = do
+          unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
+          respond res "Invalid command" []
 
 sleep :: MonadIO m => Int -> m ()
 sleep = liftIO . threadDelay . seconds
