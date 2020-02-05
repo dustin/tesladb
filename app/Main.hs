@@ -185,9 +185,17 @@ mqttSink = do
                                         <> (BC.pack . show) ds) False QoS2 []
 
 
-    tdbAPI Options{..} db unl mc t m props = maybe (pure ()) (\x -> call x ret m) (cmd t)
+    tdbAPI Options{..} db unl mc t m props = maybe (pure ()) toCall (cmd t)
 
       where
+        toCall p = do
+          tr <- timeout (seconds 10) $ call p ret m
+          case tr of
+            Nothing -> do
+              unl . logInfo $ mconcat ["Timed out calling ", tshow p]
+              respond ret "timed out" []
+            Just _  -> pure ()
+
         cmd = T.stripPrefix (T.dropWhileEnd (== '#') optInTopic)
 
         ret = blToText . foldr f "" $ props
