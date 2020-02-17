@@ -38,9 +38,10 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- net-mqtt-0.6.2.2
+- net-mqtt-0.6.2.3
 - net-mqtt-rpc-0.1.0.0
 - tesla-0.1.0.1
+
 # - git: https://github.com/dustin/tesla.git
 #   commit: 0ac38006768120cc07f7345b3a0a6c051481d88b
 
