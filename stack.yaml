@@ -39,7 +39,7 @@ packages:
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - net-mqtt-0.6.2.3
-- net-mqtt-rpc-0.1.0.0
+- net-mqtt-rpc-0.1.2.0
 - tesla-0.1.0.1
 
 # - git: https://github.com/dustin/tesla.git

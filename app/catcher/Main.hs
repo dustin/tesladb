@@ -122,10 +122,10 @@ backfill db mc dtopic = do
 
     where
       remoteDays :: (MonadLogger m, MonadIO m) => m (Maybe (Map String Int))
-      remoteDays = decode <$> liftIO (MQTTRPC.call mc (topic "days") "")
+      remoteDays = decode <$> MQTTRPC.call mc (topic "days") ""
 
       remoteDay :: (MonadLogger m, MonadIO m) => BL.ByteString -> m (Maybe (Set UTCTime))
-      remoteDay d = decode <$> liftIO (MQTTRPC.call mc (topic "day") d)
+      remoteDay d = decode <$> MQTTRPC.call mc (topic "day") d
 
       topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
       doDay d = do
@@ -141,7 +141,7 @@ backfill db mc dtopic = do
       doOne ts = do
         let (Just k) = (inner . encode) ts
         logDbg $ mconcat ["Fetching remote data from ", lstr ts]
-        vd <- liftIO $ MQTTRPC.call mc (topic "fetch") k
+        vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
         tryInsert db vd
 
