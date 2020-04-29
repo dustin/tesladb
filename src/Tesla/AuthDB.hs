@@ -6,8 +6,7 @@ module Tesla.AuthDB (updateAuth, loadAuth, loadAuthInfo) where
 import           Control.Monad          (guard)
 import           Database.SQLite.Simple hiding (bind, close)
 
-import           Tesla                  (AuthInfo (..), AuthResponse (..),
-                                         fromToken)
+import           Tesla.Auth             (AuthInfo (..), AuthResponse (..), fromToken)
 
 createStatement :: Query
 createStatement = "create table if not exists authinfo (ts, access_token, refresh_token, expires_in)"

@@ -4,12 +4,12 @@
 module Main where
 
 import           Control.Exception   (bracket_)
-import           Options.Applicative (Parser, execParser, fullDesc, help,
-                                      helper, info, long, progDesc, short,
-                                      showDefault, strOption, switch, value,
-                                      (<**>))
+import           Options.Applicative (Parser, execParser, fullDesc, help, helper, info, long, progDesc, short,
+                                      showDefault, strOption, switch, value, (<**>))
 import           System.IO           (hFlush, hGetEcho, hSetEcho, stdin, stdout)
+
 import           Tesla
+import           Tesla.Auth
 import           Tesla.AuthDB
 
 data Options = Options {

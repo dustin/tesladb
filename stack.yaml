@@ -40,10 +40,7 @@ packages:
 extra-deps:
 - net-mqtt-0.6.2.3
 - net-mqtt-rpc-0.1.2.0
-- tesla-0.1.0.1
-
-# - git: https://github.com/dustin/tesla.git
-#   commit: 0ac38006768120cc07f7345b3a0a6c051481d88b
+- tesla-0.2.0.0
 
 # Override default flag values for local packages and extra-deps
 # flags: {}

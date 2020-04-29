@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -6,20 +7,15 @@ module Main where
 
 import           Control.Concurrent         (threadDelay)
 import           Control.Concurrent.Async   (AsyncCancelled (..))
-import           Control.Concurrent.STM     (TChan, atomically, dupTChan,
-                                             newBroadcastTChanIO, orElse,
-                                             readTChan, readTVar, registerDelay,
-                                             retry, writeTChan)
+import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
+                                             readTVar, registerDelay, retry, writeTChan)
 import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (Exception, Handler (..),
-                                             MonadCatch, SomeException (..),
-                                             bracket, catches, throwM)
+import           Control.Monad.Catch        (Exception, Handler (..), MonadCatch, SomeException (..), bracket, catches,
+                                             throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT,
-                                             MonadLogger, filterLogger,
-                                             logDebugN, logErrorN, logInfoN,
-                                             runStderrLoggingT)
+import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
+                                             logInfoN, runStderrLoggingT)
 import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
@@ -32,18 +28,15 @@ import qualified Data.Text.Encoding         as TE
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
 import           Network.URI
-import           Options.Applicative        (Parser, execParser, fullDesc, help,
-                                             helper, info, long, maybeReader,
-                                             option, progDesc, short,
-                                             showDefault, strOption, switch,
-                                             value, (<**>))
+import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
+                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
 import           UnliftIO.Async             (async, race_, waitAnyCancel)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
 import           Tesla.Car
-import qualified Tesla.Commands             as CMD
+import qualified Tesla.Car.Commands         as CMD
 import           Tesla.DB
 
 data Options = Options {
@@ -297,7 +290,7 @@ seconds = (* 1000000)
 
 gather :: Options -> TChan VehicleData -> LoggingT IO ()
 gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
-    vid <- vehicleID
+    vid <- currentVehicleID
     logInfo $ mconcat ["Looping with vid: ", vid]
 
     forever $ do
