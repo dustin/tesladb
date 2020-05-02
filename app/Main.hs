@@ -322,7 +322,7 @@ raceABunch_ is = traverse async is >>= void.waitAnyCancel
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = withLog $ do
   tch <- liftIO newBroadcastTChanIO
-  let sinks = [dbSink, watchdogSink] <> if optNoMQTT then [] else [excLoop "mqtt" mqttSink]
+  let sinks = [dbSink, watchdogSink] <> [excLoop "mqtt" mqttSink | not optNoMQTT]
   race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where
