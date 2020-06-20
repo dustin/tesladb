@@ -1,7 +1,8 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE NamedFieldPuns    #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE NamedFieldPuns      #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main where
 
@@ -10,8 +11,8 @@ import           Control.Concurrent.Async   (AsyncCancelled (..))
 import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
                                              readTVar, registerDelay, retry, writeTChan)
 import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (Exception, Handler (..), MonadCatch, SomeException (..), bracket, catches,
-                                             throwM)
+import           Control.Monad.Catch        (Exception, Handler (..), MonadCatch, SomeException (..), bracket, catch,
+                                             catches, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
@@ -157,7 +158,8 @@ mqttSink = do
 
     disco Options{optMQTTURI} unl c = unl $ do
       logErr $ "disconnecting from " <> tshow optMQTTURI
-      liftIO $ normalDisconnect c
+      catch (liftIO $ normalDisconnect c) (\(e :: SomeException) ->
+                                              logInfo $ "error disconnecting " <> tshow e)
       logInfo $ "disconnected from " <> tshow optMQTTURI
 
     store Options{..} ch unl mc = forever $ do
@@ -202,7 +204,7 @@ mqttSink = do
             f _                     = False
 
         respond :: MonadIO m => Text -> BL.ByteString -> [Property] -> m ()
-        respond "" _  _ = pure ()
+        respond "" _  _  = pure ()
         respond rt rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
         callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
