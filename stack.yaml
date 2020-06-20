@@ -38,7 +38,7 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- net-mqtt-0.7.0.0
+- net-mqtt-0.7.0.1
 - net-mqtt-rpc-0.1.2.1
 - tesla-0.2.0.0
 
