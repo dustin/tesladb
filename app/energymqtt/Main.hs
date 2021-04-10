@@ -160,7 +160,7 @@ seconds :: Int -> Int
 seconds = (* 1000000)
 
 lifeTime :: Num a => a
-lifeTime = 1800
+lifeTime = 900
 
 gather :: Options -> TChan Value -> LoggingT IO ()
 gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
