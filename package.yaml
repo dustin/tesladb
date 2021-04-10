@@ -64,6 +64,18 @@ executables:
     dependencies:
     - tesladb
 
+  teslaenergy:
+    main:                Main.hs
+    source-dirs:         app/energymqtt
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -eventlog
+    - -with-rtsopts=-N
+    - -Wall
+    dependencies:
+    - tesladb
+
   teslauth:
     main:                Main.hs
     source-dirs:         app/auth
