@@ -121,7 +121,7 @@ mqttSink = do
         readTChan ch
       void . unl . logDbg $ "Delivering data via MQTT"
       let d = encode ((edata :: Value) ^?! key "response")
-      publishq mc optMQTTTopic d True QoS2 [PropMessageExpiryInterval 900,
+      publishq mc optMQTTTopic d True QoS2 [PropMessageExpiryInterval (lifeTime*2),
                                             PropContentType "application/json"]
       unl . logDbg $ "Delivered vdata via MQTT"
 
@@ -159,6 +159,9 @@ sleep = liftIO . threadDelay . seconds
 seconds :: Int -> Int
 seconds = (* 1000000)
 
+lifeTime :: Num a => a
+lifeTime = 1800
+
 gather :: Options -> TChan Value -> LoggingT IO ()
 gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
     logInfo $ mconcat ["Looping with eid: ", tshow optEID]
@@ -174,7 +177,7 @@ gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
     process (Just edata) = do
       logInfo $ mconcat ["Fetched data for eid: ", tshow optEID]
       liftIO . atomically $ writeTChan ch edata
-      pure 1800 -- sleep time
+      pure lifeTime -- sleep time
 
 raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
 raceABunch_ is = traverse async is >>= void.waitAnyCancel
