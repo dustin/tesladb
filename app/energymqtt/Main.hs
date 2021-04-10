@@ -128,7 +128,7 @@ mqttSink = do
 watchdogSink :: Sink ()
 watchdogSink = do
   ch <- asks _sink_chan
-  tov <- liftIO $ registerDelay (3*600000000)
+  tov <- liftIO $ registerDelay (seconds (3 * lifeTime))
   again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
   logDbg $ "Watchdog returned " <> tshow again
   unless again $ liftIO $ die "Watchdog timeout"
