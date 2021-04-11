@@ -80,20 +80,20 @@ mqttSink = do
     withMQTT db opts unl = bracket (connect db opts unl) (disco opts unl)
 
     connect db opts@Options{..} unl = do
-      unl . logInfo $ mconcat ["Connecting to ", tshow optMQTTURI]
+      unl $ logInfoL ["Connecting to ", tshow optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50,
                                   _msgCB=SimpleCallback (tdbAPI opts db unl)} optMQTTURI
       props <- svrProps mc
-      unl . logInfo $ mconcat ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
+      unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
       subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
-      unl . logInfo $ mconcat ["MQTT sub response: ", tshow subr]
+      unl $ logInfoL ["MQTT sub response: ", tshow subr]
       pure mc
 
     disco Options{optMQTTURI} unl c = unl $ do
-      logErr $ "disconnecting from " <> tshow optMQTTURI
+      logErrL ["disconnecting from ", tshow optMQTTURI]
       catch (liftIO $ normalDisconnect c) (\(e :: SomeException) ->
-                                              logInfo $ "error disconnecting " <> tshow e)
-      logInfo $ "disconnected from " <> tshow optMQTTURI
+                                              logInfoL ["error disconnecting ", tshow e])
+      logInfoL ["disconnected from ", tshow optMQTTURI]
 
     store Options{..} ch unl mc = forever $ do
       vdata <- atomically $ do
@@ -120,7 +120,7 @@ mqttSink = do
           tr <- timeout (seconds 10) $ call p ret m
           case tr of
             Nothing -> do
-              unl . logInfo $ mconcat ["Timed out calling ", tshow p]
+              unl $ logInfoL ["Timed out calling ", tshow p]
               respond ret "timed out" []
             Just _  -> pure ()
 
@@ -141,9 +141,9 @@ mqttSink = do
         respond rt rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
         callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
-          logInfo $ mconcat ["Command requested: ", cmdname]
+          logInfoL ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
-          logInfo $ mconcat ["Finished command: ", cmdname, " with result: ", tshow r]
+          logInfoL ["Finished command: ", cmdname, " with result: ", tshow r]
           respond rt (res r) []
             where cmdname = fromJust . cmd $ t
                   res = either textToBL (const "")
@@ -194,33 +194,33 @@ mqttSink = do
 
         -- All RPCs below require a response topic.
 
-        call p "" _ = unl . logInfo $ mconcat ["request to ", tshow p, " with no response topic"]
+        call p "" _ = unl $ logInfoL ["request to ", tshow p, " with no response topic"]
 
         call "days" res _ = do
-          unl . logInfo $ mconcat ["Days call responding to ", tshow res]
+          unl $ logInfoL ["Days call responding to ", tshow res]
           days <- listDays db
           respond res (encode . Map.fromList $ days) [PropContentType "application/json"]
 
         call "day" res d = do
-          unl . logInfo $ mconcat ["Day call for ", tshow d, " responding to ", tshow res]
+          unl $ logInfoL ["Day call for ", tshow d, " responding to ", tshow res]
           days <- listDay db (BC.unpack d)
           respond res (encode days) [PropContentType "application/json"]
 
         call "fetch" res tss = do
-          unl . logInfo $ mconcat ["Fetch call for ", tshow tss, " responding to ", tshow res]
+          unl $ logInfoL ["Fetch call for ", tshow tss, " responding to ", tshow res]
           let mts = decode ("\"" <> tss <> "\"")
           guard $ isJust mts
           vdata <- fetchDatum db (fromJust mts)
           respond res vdata [PropContentType "application/json"]
 
         call x res _ = do
-          unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
+          unl $ logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
 gather :: Options -> TChan VehicleData -> LoggingT IO ()
 gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
-    logInfo $ mconcat ["Looping with vid: ", vid]
+    logInfoL ["Looping with vid: ", vid]
 
     timeLoop vehicleData (process vid)
 
@@ -232,12 +232,12 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
           | otherwise           = 600
 
     process vid vdata = do
-      logInfo $ mconcat ["Fetched data for vid: ", vid]
+      logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
-      logInfo $ mconcat ["Sleeping for ", tshow nt,
-                         " user present: ", tshow $ isUserPresent vdata,
-                         ", charging: ", tshow $ isCharging vdata]
+      logInfoL ["Sleeping for ", tshow nt,
+                " user present: ", tshow $ isUserPresent vdata,
+                ", charging: ", tshow $ isCharging vdata]
       pure nt
 
 run :: Options -> IO ()

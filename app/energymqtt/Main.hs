@@ -54,17 +54,17 @@ mqttSink = do
     withMQTT opts unl = bracket (connect opts unl) (disco opts unl)
 
     connect Options{..} unl = do
-      void . unl . logInfo $ mconcat ["Connecting to ", tshow optMQTTURI]
+      void . unl $ logInfoL ["Connecting to ", tshow optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
       props <- svrProps mc
-      void . unl . logInfo $ mconcat ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
+      void . unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
       pure mc
 
     disco Options{optMQTTURI} unl c = unl $ do
-      logErr $ "disconnecting from " <> tshow optMQTTURI
+      logErrL ["disconnecting from ", tshow optMQTTURI]
       catch (liftIO $ normalDisconnect c) (\(e :: SomeException) ->
-                                              logInfo $ "error disconnecting " <> tshow e)
-      logInfo $ "disconnected from " <> tshow optMQTTURI
+                                              logInfoL ["error disconnecting ", tshow e])
+      logInfoL ["disconnected from ", tshow optMQTTURI]
 
     store Options{..} ch unl mc = forever $ do
       edata <- atomically $ do

@@ -14,6 +14,7 @@ import           Control.Monad.Logger     (LogLevel (..), LoggingT, MonadLogger,
                                            logInfoN, runStderrLoggingT)
 import           Control.Monad.Reader     (ReaderT (..), asks)
 import qualified Data.ByteString.Lazy     as BL
+import           Data.Foldable            (fold)
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
@@ -47,11 +48,20 @@ die = throwM . Die
 logErr :: MonadLogger m => Text -> m ()
 logErr = logErrorN
 
+logErrL :: (MonadLogger m, Foldable f) => f Text -> m ()
+logErrL = logErrorN . fold
+
 logInfo :: MonadLogger m => Text -> m ()
 logInfo = logInfoN
 
+logInfoL :: (MonadLogger m, Foldable f) => f Text -> m ()
+logInfoL = logInfoN . fold
+
 logDbg :: MonadLogger m => Text -> m ()
 logDbg = logDebugN
+
+logDbgL :: (MonadLogger m, Foldable f) => f Text -> m ()
+logDbgL = logDebugN . fold
 
 tshow :: Show a => a -> Text
 tshow = T.pack . show
@@ -65,7 +75,7 @@ excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
     otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
     otherHandler e = do
-      logErr $ mconcat ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
+      logErrL ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
       sleep 5
 
 sleep :: MonadIO m => Int -> m ()
@@ -82,7 +92,7 @@ watchdogSink secs = do
   ch <- asks _sink_chan
   tov <- liftIO $ registerDelay (seconds secs)
   again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
-  logDbg $ "Watchdog returned " <> tshow again
+  logDbgL ["Watchdog returned ", tshow again]
   unless again $ liftIO $ die "Watchdog timeout"
   watchdogSink secs
 
