@@ -222,7 +222,7 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
 
-    timeLoop vehicleData (process vid)
+    timeLoop fetch (process vid)
 
   where
     naptime :: VehicleData -> Int
@@ -231,7 +231,10 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
           | isCharging vdata    = 300
           | otherwise           = 600
 
-    process vid vdata = do
+    fetch = isAwake >>= \awake -> if awake then (Just <$> vehicleData) else pure Nothing
+
+    process _ Nothing = logInfo "No data, must be sleeping or something" *> pure 300
+    process vid (Just vdata) = do
       logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
@@ -242,7 +245,8 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} =
-  runSinks optVerbose opts gather ([dbSink, watchdogSink 1800] <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+  runSinks optVerbose opts gather ([dbSink, watchdogSink (3600 * 12)]
+                                    <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts
