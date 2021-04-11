@@ -36,7 +36,6 @@ data Options = Options {
   , optVerbose   :: Bool
   , optMQTTURI   :: URI
   , optMQTTTopic :: Text
-  , optInTopic   :: Text
   }
 
 options :: Parser Options
@@ -46,7 +45,6 @@ options = Options
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
   <*> option (maybeReader parseURI) (long "mqtt-uri" <> showDefault <> value (fromJust $ parseURI "mqtt://localhost/") <> help "mqtt broker URI")
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
-  <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
 
 mqttSink :: (Sink Options Value) ()
 mqttSink = do
@@ -62,8 +60,6 @@ mqttSink = do
       mc <- connectURI mqttConfig{_protocol=Protocol50} optMQTTURI
       props <- svrProps mc
       void . unl . logInfo $ mconcat ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
-      subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
-      void . unl . logInfo $ mconcat ["MQTT sub response: ", tshow subr]
       pure mc
 
     disco Options{optMQTTURI} unl c = unl $ do
