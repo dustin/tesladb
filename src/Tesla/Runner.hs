@@ -4,18 +4,20 @@ module Tesla.Runner where
 
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (AsyncCancelled (..))
-import           Control.Concurrent.STM   (TChan, atomically, orElse, readTChan, readTVar, registerDelay, retry)
+import           Control.Concurrent.STM   (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
+                                           readTVar, registerDelay, retry)
 import           Control.Monad            (forever, unless, void)
 import           Control.Monad.Catch      (Exception, Handler (..), MonadCatch, SomeException (..), catches, throwM)
 import           Control.Monad.IO.Class   (MonadIO (..))
 import           Control.Monad.IO.Unlift  (MonadUnliftIO)
-import           Control.Monad.Logger     (LoggingT, MonadLogger, logDebugN, logErrorN, logInfoN)
-import           Control.Monad.Reader     (ReaderT, asks)
+import           Control.Monad.Logger     (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
+                                           logInfoN, runStderrLoggingT)
+import           Control.Monad.Reader     (ReaderT (..), asks)
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
-import           UnliftIO.Async           (async, waitAnyCancel)
+import           UnliftIO.Async           (async, race_, waitAnyCancel)
 
 data SinkEnv o a = SinkEnv {
   _sink_options :: o,
@@ -88,3 +90,16 @@ watchdogSink secs = do
         v' <- readTVar v
         unless v' retry
         pure False
+
+runSinks :: Bool -> o -> (o -> TChan a -> LoggingT IO ()) -> [Sink o a ()] -> IO ()
+runSinks verbose opts gather sinks = withLog $ do
+  tch <- liftIO newBroadcastTChanIO
+  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+
+  where
+
+    d ch = liftIO . atomically $ dupTChan ch
+    runSink f ch = runReaderT f (SinkEnv opts ch)
+    logfilt = filterLogger (\_ -> flip (if verbose then (>=) else (>)) LevelDebug)
+    withLog :: MonadIO m => LoggingT m a -> m a
+    withLog = runStderrLoggingT . logfilt

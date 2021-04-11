@@ -6,14 +6,14 @@
 
 module Main where
 
-import           Control.Concurrent.STM  (TChan, atomically, dupTChan, newBroadcastTChanIO, readTChan, writeTChan)
+import           Control.Concurrent.STM  (TChan, atomically, readTChan, writeTChan)
 import           Control.Lens
 import           Control.Monad           (forever, unless, void)
 import           Control.Monad.Catch     (SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class  (MonadIO (..))
 import           Control.Monad.IO.Unlift (withRunInIO)
-import           Control.Monad.Logger    (LogLevel (..), LoggingT, MonadLogger, filterLogger, runStderrLoggingT)
-import           Control.Monad.Reader    (ReaderT (..), asks, runReaderT)
+import           Control.Monad.Logger    (LoggingT, MonadLogger)
+import           Control.Monad.Reader    (asks)
 import           Data.Aeson              (Value (..), encode)
 import           Data.Aeson.Lens
 import           Data.Maybe              (fromJust)
@@ -22,7 +22,6 @@ import           Network.MQTT.Client
 import           Network.URI
 import           Options.Applicative     (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
                                           option, progDesc, short, showDefault, strOption, switch, value, (<**>))
-import           UnliftIO.Async          (race_)
 import           UnliftIO.Timeout        (timeout)
 
 import           Tesla                   (EnergyID)
@@ -100,18 +99,8 @@ gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
       pure lifeTime -- sleep time
 
 run :: Options -> IO ()
-run opts@Options{optVerbose} = withLog $ do
-  tch <- liftIO newBroadcastTChanIO
-  let sinks = [excLoop "mqtt" mqttSink, watchdogSink (3*lifeTime)]
-  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
-
-  where
-
-    d ch = liftIO . atomically $ dupTChan ch
-    runSink f ch = runReaderT f (SinkEnv opts ch)
-    logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
-    withLog :: MonadIO m => LoggingT m a -> m a
-    withLog = runStderrLoggingT . logfilt
+run opts@Options{optVerbose} =
+  runSinks optVerbose opts gather [watchdogSink (3*lifeTime), excLoop "mqtt" mqttSink]
 
 main :: IO ()
 main = run =<< execParser opts

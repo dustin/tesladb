@@ -6,13 +6,13 @@
 
 module Main where
 
-import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, readTChan, writeTChan)
+import           Control.Concurrent.STM     (TChan, atomically, readTChan, writeTChan)
 import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, runStderrLoggingT)
-import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
+import           Control.Monad.Logger       (LoggingT, MonadLogger)
+import           Control.Monad.Reader       (ReaderT (..), asks)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -26,7 +26,6 @@ import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
-import           UnliftIO.Async             (race_)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
@@ -247,18 +246,8 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
       pure nt
 
 run :: Options -> IO ()
-run opts@Options{optNoMQTT, optVerbose} = withLog $ do
-  tch <- liftIO newBroadcastTChanIO
-  let sinks = [dbSink, watchdogSink 180] <> [excLoop "mqtt" mqttSink | not optNoMQTT]
-  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
-
-  where
-
-    d ch = liftIO . atomically $ dupTChan ch
-    runSink f ch = runReaderT f (SinkEnv opts ch)
-    logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
-    withLog :: MonadIO m => LoggingT m a -> m a
-    withLog = runStderrLoggingT . logfilt
+run opts@Options{optNoMQTT, optVerbose} =
+  runSinks optVerbose opts gather ([dbSink, watchdogSink 180] <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts
