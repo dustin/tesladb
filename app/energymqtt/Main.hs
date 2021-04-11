@@ -6,36 +6,29 @@
 
 module Main where
 
-import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (AsyncCancelled (..))
-import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
-                                             readTVar, registerDelay, retry, writeTChan)
+import           Control.Concurrent.STM  (TChan, atomically, dupTChan, newBroadcastTChanIO, readTChan, writeTChan)
 import           Control.Lens
-import           Control.Monad              (forever, unless, void)
-import           Control.Monad.Catch        (Exception, Handler (..), MonadCatch, SomeException (..), bracket, catch,
-                                             catches, throwM)
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
-                                             logInfoN, runStderrLoggingT)
-import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
-import           Data.Aeson                 (Value (..), encode)
+import           Control.Monad           (forever, unless, void)
+import           Control.Monad.Catch     (SomeException (..), bracket, catch, throwM)
+import           Control.Monad.IO.Class  (MonadIO (..))
+import           Control.Monad.IO.Unlift (withRunInIO)
+import           Control.Monad.Logger    (LogLevel (..), LoggingT, MonadLogger, filterLogger, runStderrLoggingT)
+import           Control.Monad.Reader    (ReaderT (..), asks, runReaderT)
+import           Data.Aeson              (Value (..), encode)
 import           Data.Aeson.Lens
-import qualified Data.ByteString.Lazy       as BL
-import           Data.Maybe                 (fromJust)
-import           Data.Text                  (Text)
-import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as TE
+import           Data.Maybe              (fromJust)
+import           Data.Text               (Text)
 import           Network.MQTT.Client
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
-                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
-import           UnliftIO.Async             (async, race_, waitAnyCancel)
-import           UnliftIO.Timeout           (timeout)
+import           Options.Applicative     (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
+                                          option, progDesc, short, showDefault, strOption, switch, value, (<**>))
+import           UnliftIO.Async          (race_)
+import           UnliftIO.Timeout        (timeout)
 
-import           Tesla                      (EnergyID)
+import           Tesla                   (EnergyID)
 import           Tesla.AuthDB
 import           Tesla.Energy
+import           Tesla.Runner
 
 data Options = Options {
   optDBPath      :: FilePath
@@ -46,13 +39,6 @@ data Options = Options {
   , optInTopic   :: Text
   }
 
-data SinkEnv = SinkEnv {
-  _sink_options :: Options,
-  _sink_chan    :: TChan Value
-  }
-
-type Sink = ReaderT SinkEnv (LoggingT IO)
-
 options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
@@ -62,35 +48,7 @@ options = Options
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
 
-newtype DeathException = Die String deriving(Eq, Show)
-
-instance Exception DeathException
-
-logErr :: MonadLogger m => Text -> m ()
-logErr = logErrorN
-
-logInfo :: MonadLogger m => Text -> m ()
-logInfo = logInfoN
-
-logDbg :: MonadLogger m => Text -> m ()
-logDbg = logDebugN
-
-tshow :: Show a => a -> Text
-tshow = T.pack . show
-
-excLoop :: Text -> Sink () -> Sink ()
-excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
-
-  where
-    cancelHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => AsyncCancelled -> m ()
-    cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwM e
-
-    otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
-    otherHandler e = do
-      logErr $ mconcat ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
-      sleep 5
-
-mqttSink :: Sink ()
+mqttSink :: (Sink Options Value) ()
 mqttSink = do
   opts <- asks _sink_options
   ch <- asks _sink_chan
@@ -125,40 +83,6 @@ mqttSink = do
                                             PropContentType "application/json"]
       unl . logDbg $ "Delivered vdata via MQTT"
 
-watchdogSink :: Sink ()
-watchdogSink = do
-  ch <- asks _sink_chan
-  tov <- liftIO $ registerDelay (seconds (3 * lifeTime))
-  again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
-  logDbg $ "Watchdog returned " <> tshow again
-  unless again $ liftIO $ die "Watchdog timeout"
-  watchdogSink
-
-    where
-      checkTimeout v = do
-        v' <- readTVar v
-        unless v' retry
-        pure False
-
-data DisconnectedException = DisconnectedException deriving Show
-
-instance Exception DisconnectedException
-
-blToText :: BL.ByteString -> Text
-blToText = TE.decodeUtf8 . BL.toStrict
-
-textToBL :: Text -> BL.ByteString
-textToBL = BL.fromStrict . TE.encodeUtf8
-
-die :: String -> IO ()
-die = throwM . Die
-
-sleep :: MonadIO m => Int -> m ()
-sleep = liftIO . threadDelay . seconds
-
-seconds :: Int -> Int
-seconds = (* 1000000)
-
 lifeTime :: Num a => a
 lifeTime = 900
 
@@ -179,13 +103,10 @@ gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
       liftIO . atomically $ writeTChan ch edata
       pure lifeTime -- sleep time
 
-raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
-raceABunch_ is = traverse async is >>= void.waitAnyCancel
-
 run :: Options -> IO ()
 run opts@Options{optVerbose} = withLog $ do
   tch <- liftIO newBroadcastTChanIO
-  let sinks = [excLoop "mqtt" mqttSink, watchdogSink]
+  let sinks = [excLoop "mqtt" mqttSink, watchdogSink (3*lifeTime)]
   race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where
