@@ -242,7 +242,7 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} =
-  runSinks optVerbose opts gather ([dbSink, watchdogSink 180] <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+  runSinks optVerbose opts gather ([dbSink, watchdogSink 1800] <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts
