@@ -6,17 +6,12 @@
 
 module Main where
 
-import           Control.Concurrent         (threadDelay)
-import           Control.Concurrent.Async   (AsyncCancelled (..))
-import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
-                                             readTVar, registerDelay, retry, writeTChan)
+import           Control.Concurrent.STM     (TChan, atomically, dupTChan, newBroadcastTChanIO, readTChan, writeTChan)
 import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (Exception, Handler (..), MonadCatch, SomeException (..), bracket, catch,
-                                             catches, throwM)
+import           Control.Monad.Catch        (SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
-                                             logInfoN, runStderrLoggingT)
+import           Control.Monad.IO.Unlift    (withRunInIO)
+import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, runStderrLoggingT)
 import           Control.Monad.Reader       (ReaderT (..), asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
@@ -25,20 +20,20 @@ import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, isJust)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
-import qualified Data.Text.Encoding         as TE
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
 import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
-import           UnliftIO.Async             (async, race_, waitAnyCancel)
+import           UnliftIO.Async             (race_)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla.AuthDB
 import           Tesla.Car
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.DB
+import           Tesla.Runner
 
 data Options = Options {
   optDBPath        :: FilePath
@@ -51,12 +46,7 @@ data Options = Options {
   , optCMDsEnabled :: Bool
   }
 
-data SinkEnv = SinkEnv {
-  _sink_options :: Options,
-  _sink_chan    :: TChan VehicleData
-  }
-
-type Sink = ReaderT SinkEnv (LoggingT IO)
+type VSink = Sink Options VehicleData
 
 options :: Parser Options
 options = Options
@@ -69,50 +59,7 @@ options = Options
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
   <*> switch (long "enable-commands" <> help "enable remote commands")
 
-newtype DeathException = Die String deriving(Eq, Show)
-
-instance Exception DeathException
-
-logErr :: MonadLogger m => Text -> m ()
-logErr = logErrorN
-
-logInfo :: MonadLogger m => Text -> m ()
-logInfo = logInfoN
-
-logDbg :: MonadLogger m => Text -> m ()
-logDbg = logDebugN
-
-tshow :: Show a => a -> Text
-tshow = T.pack . show
-
-excLoop :: Text -> Sink () -> Sink ()
-excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
-
-  where
-    cancelHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => AsyncCancelled -> m ()
-    cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwM e
-
-    otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
-    otherHandler e = do
-      logErr $ mconcat ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
-      sleep 5
-
-watchdogSink :: Sink ()
-watchdogSink = do
-  ch <- asks _sink_chan
-  tov <- liftIO $ registerDelay (3*600000000)
-  again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
-  logDbg $ "Watchdog returned " <> tshow again
-  unless again $ liftIO $ die "Watchdog timeout"
-  watchdogSink
-
-    where
-      checkTimeout v = do
-        v' <- readTVar v
-        unless v' retry
-        pure False
-
-dbSink :: Sink ()
+dbSink :: VSink ()
 dbSink = do
   Options{optDBPath} <- asks _sink_options
   ch <- asks _sink_chan
@@ -124,20 +71,7 @@ dbSink = do
 
       forever $ atomically (readTChan ch) >>= insertVData db
 
-data DisconnectedException = DisconnectedException deriving Show
-
-instance Exception DisconnectedException
-
-blToText :: BL.ByteString -> Text
-blToText = TE.decodeUtf8 . BL.toStrict
-
-textToBL :: Text -> BL.ByteString
-textToBL = BL.fromStrict . TE.encodeUtf8
-
-die :: String -> IO ()
-die = throwM . Die
-
-mqttSink :: Sink ()
+mqttSink :: VSink ()
 mqttSink = do
   opts@Options{optDBPath} <- asks _sink_options
   ch <- asks _sink_chan
@@ -284,12 +218,6 @@ mqttSink = do
           unl $ logInfo $ mconcat ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-sleep :: MonadIO m => Int -> m ()
-sleep = liftIO . threadDelay . seconds
-
-seconds :: Int -> Int
-seconds = (* 1000000)
-
 gather :: Options -> TChan VehicleData -> LoggingT IO ()
 gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
@@ -318,13 +246,10 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
                          ", charging: ", tshow $ isCharging vdata]
       pure nt
 
-raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
-raceABunch_ is = traverse async is >>= void.waitAnyCancel
-
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = withLog $ do
   tch <- liftIO newBroadcastTChanIO
-  let sinks = [dbSink, watchdogSink] <> [excLoop "mqtt" mqttSink | not optNoMQTT]
+  let sinks = [dbSink, watchdogSink 180] <> [excLoop "mqtt" mqttSink | not optNoMQTT]
   race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where
