@@ -22,7 +22,6 @@ import           Network.MQTT.Client
 import           Network.URI
 import           Options.Applicative     (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
                                           option, progDesc, short, showDefault, strOption, switch, value, (<**>))
-import           UnliftIO.Timeout        (timeout)
 
 import           Tesla                   (EnergyID)
 import           Tesla.AuthDB
@@ -82,21 +81,10 @@ lifeTime :: Num a => a
 lifeTime = 900
 
 gather :: Options -> TChan Value -> LoggingT IO ()
-gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ do
-    logInfo $ mconcat ["Looping with eid: ", tshow optEID]
-
-    forever $ do
-      logDbg "Fetching"
-      edata <- timeout (seconds 10) siteData
-      sleep =<< process edata
-
+gather Options{..} ch = runEnergy (loadAuthInfo optDBPath) optEID $ timeLoop siteData process
   where
-    process :: (MonadLogger m, MonadIO m) => Maybe Value -> m Int
-    process Nothing = logErr "Timed out, retrying in 60s" >> pure 60
-    process (Just edata) = do
-      logInfo $ mconcat ["Fetched data for eid: ", tshow optEID]
-      liftIO . atomically $ writeTChan ch edata
-      pure lifeTime -- sleep time
+    process :: (MonadLogger m, MonadIO m) => Value -> m Int
+    process edata = liftIO . atomically $ writeTChan ch edata *> pure lifeTime
 
 run :: Options -> IO ()
 run opts@Options{optVerbose} =

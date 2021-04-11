@@ -11,8 +11,8 @@ import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (withRunInIO)
-import           Control.Monad.Logger       (LoggingT, MonadLogger)
-import           Control.Monad.Reader       (ReaderT (..), asks)
+import           Control.Monad.Logger       (LoggingT)
+import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -222,10 +222,7 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfo $ mconcat ["Looping with vid: ", vid]
 
-    forever $ do
-      logDbg "Fetching"
-      vdata <- timeout (seconds 10) vehicleData
-      sleep =<< process vid vdata
+    timeLoop vehicleData (process vid)
 
   where
     naptime :: VehicleData -> Int
@@ -234,9 +231,7 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
           | isCharging vdata    = 300
           | otherwise           = 600
 
-    process :: (MonadLogger m, MonadIO m) => Text -> Maybe VehicleData -> m Int
-    process _ Nothing = logErr "Timed out, retrying in 60s" >> pure 60
-    process vid (Just vdata) = do
+    process vid vdata = do
       logInfo $ mconcat ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata

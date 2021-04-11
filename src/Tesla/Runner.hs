@@ -18,6 +18,7 @@ import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
 import           UnliftIO.Async           (async, race_, waitAnyCancel)
+import           UnliftIO.Timeout         (timeout)
 
 data SinkEnv o a = SinkEnv {
   _sink_options :: o,
@@ -90,6 +91,15 @@ watchdogSink secs = do
         v' <- readTVar v
         unless v' retry
         pure False
+
+timeLoop :: (MonadUnliftIO f, MonadLogger f) => f t -> (t -> f Int) -> f b
+timeLoop a p = forever $ do
+  d <- timeout (seconds 10) a
+  sleep =<< process d
+
+  where
+    process Nothing  = logErr "Timed out, retrying in 60s" *> pure 60
+    process (Just d) = p d
 
 runSinks :: Bool -> o -> (o -> TChan a -> LoggingT IO ()) -> [Sink o a ()] -> IO ()
 runSinks verbose opts gather sinks = withLog $ do
