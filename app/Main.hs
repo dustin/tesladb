@@ -6,15 +6,15 @@
 
 module Main where
 
-import           Control.Concurrent.STM     (TChan, atomically, readTChan, writeTChan)
 import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (withRunInIO)
-import           Control.Monad.Logger       (LoggingT)
+import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
+import           Control.Monad.Logger       (MonadLogger(..))
 import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
+import Data.Bool (bool)
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, isJust)
@@ -27,6 +27,7 @@ import           Options.Applicative        (Parser, execParser, fullDesc, help,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
 import           UnliftIO.Timeout           (timeout)
+import           UnliftIO                   (TChan, readTChan, writeTChan, atomically, TVar, newTVarIO, readTVar, writeTVar)
 
 import           Tesla.AuthDB
 import           Tesla.Car
@@ -45,7 +46,12 @@ data Options = Options {
   , optCMDsEnabled :: Bool
   }
 
-type VSink = Sink Options VehicleData
+data State m = State {
+  opts :: Options
+  , prereq :: TVar (Car m (Either Text ()))
+  }
+
+type VSink m = Sink (State m) VehicleData
 
 options :: Parser Options
 options = Options
@@ -58,9 +64,9 @@ options = Options
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
   <*> switch (long "enable-commands" <> help "enable remote commands")
 
-dbSink :: VSink ()
+dbSink :: MonadIO m => (VSink m) ()
 dbSink = do
-  Options{optDBPath} <- asks _sink_options
+  Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
   liftIO $ withConnection optDBPath (storeThings ch)
 
@@ -70,9 +76,9 @@ dbSink = do
 
       forever $ atomically (readTChan ch) >>= insertVData db
 
-mqttSink :: VSink ()
+mqttSink :: (MonadLogger m, MonadIO m) => (VSink m) ()
 mqttSink = do
-  opts@Options{optDBPath} <- asks _sink_options
+  opts@Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
   withRunInIO $ \unl -> withConnection optDBPath (\db -> withMQTT db opts unl (store opts ch unl))
 
@@ -192,6 +198,13 @@ mqttSink = do
 
         call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
 
+        call "cmd/sleep" res _ = do
+          unl $ do
+            p <- asks (prereq . _sink_options)
+            atomically $ writeTVar p (checkAsleep p)
+            logInfo "Switching to checkAsleep"
+          respond res "OK" []
+
         -- All RPCs below require a response topic.
 
         call p "" _ = unl $ logInfoL ["request to ", tshow p, " with no response topic"]
@@ -217,8 +230,20 @@ mqttSink = do
           unl $ logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-gather :: Options -> TChan VehicleData -> LoggingT IO ()
-gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
+checkAwake :: (MonadLogger m, MonadIO m) => Car m (Either Text ())
+checkAwake = bool (Left "not awake") (Right ()) <$> isAwake
+
+checkAsleep :: (MonadLogger m, MonadIO m) => TVar (Car m (Either Text ())) -> Car m (Either Text ())
+checkAsleep p = do
+  a <- isAwake
+  if a then pure (Left "not asleep")
+  else do
+    atomically $ writeTVar p checkAwake
+    logInfo "Transitioning back to checkAwake"
+    pure (Right ())
+
+gather :: (MonadLogger m, MonadUnliftIO m) => State m -> TChan VehicleData -> m a
+gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
 
@@ -229,12 +254,17 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     naptime vdata
           | isUserPresent vdata =  60
           | isCharging vdata    = 300
-          | otherwise           = 600
+          | otherwise           = 900
 
-    fetch = isAwake >>= \awake -> if awake then (Just <$> vehicleData) else pure Nothing
+    fetch = do
+              pa <- liftIO . atomically $ readTVar pv
+              e <- pa
+              case e of
+                Left x -> pure (Left x)
+                Right _ -> Right <$> vehicleData
 
-    process _ Nothing = logInfo "No data, must be sleeping or something" *> pure 300
-    process vid (Just vdata) = do
+    process _ (Left s) = logInfoL ["No data: ", s] *> pure 300
+    process vid (Right vdata) = do
       logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch vdata
       let nt = naptime vdata
@@ -244,9 +274,10 @@ gather Options{..} ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
       pure nt
 
 run :: Options -> IO ()
-run opts@Options{optNoMQTT, optVerbose} =
-  runSinks optVerbose opts gather ([dbSink, watchdogSink (3600 * 12)]
-                                    <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+run opts@Options{optNoMQTT, optVerbose} = do
+  p <- newTVarIO checkAwake
+  runSinks optVerbose (State opts p) gather ([dbSink, watchdogSink (3600 * 12)]
+                                              <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts
