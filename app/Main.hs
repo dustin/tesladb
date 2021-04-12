@@ -238,10 +238,7 @@ checkAsleep :: (MonadLogger m, MonadIO m) => TVar (Car m (Either Text ())) -> Ca
 checkAsleep p = do
   a <- isAwake
   if a then pure (Left "not asleep")
-  else do
-    atomically $ writeTVar p checkAwake
-    logInfo "Transitioning back to checkAwake"
-    pure (Right ())
+  else atomically $ writeTVar p checkAwake *> pure (Left "transitioned to checkAwake")
 
 gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan VehicleData -> m a
 gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
