@@ -7,14 +7,14 @@
 module Main where
 
 import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (SomeException (..), bracket, catch, throwM)
+import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (MonadLogger(..))
+import           Control.Monad.Logger       (MonadLogger (..))
 import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (decode, encode)
+import           Data.Bool                  (bool)
 import qualified Data.ByteString.Lazy       as BL
-import Data.Bool (bool)
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, isJust)
@@ -26,8 +26,9 @@ import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
+import           UnliftIO                   (TChan, TVar, atomically, newTVarIO, readTChan, readTVar, writeTChan,
+                                             writeTVar)
 import           UnliftIO.Timeout           (timeout)
-import           UnliftIO                   (TChan, readTChan, writeTChan, atomically, TVar, newTVarIO, readTVar, writeTVar)
 
 import           Tesla.AuthDB
 import           Tesla.Car
@@ -47,7 +48,7 @@ data Options = Options {
   }
 
 data State m = State {
-  opts :: Options
+  opts     :: Options
   , prereq :: TVar (Car m (Either Text ()))
   }
 
@@ -242,7 +243,7 @@ checkAsleep p = do
     logInfo "Transitioning back to checkAwake"
     pure (Right ())
 
-gather :: (MonadLogger m, MonadUnliftIO m) => State m -> TChan VehicleData -> m a
+gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan VehicleData -> m a
 gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
@@ -257,11 +258,10 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
           | otherwise           = 900
 
     fetch = do
-              pa <- liftIO . atomically $ readTVar pv
-              e <- pa
-              case e of
-                Left x -> pure (Left x)
-                Right _ -> Right <$> vehicleData
+              pa <- (liftIO . atomically . readTVar) pv
+              either (pure . Left) (const vd) =<< pa
+
+    vd = catch (Right <$> vehicleData) (\(e :: SomeException) -> pure (Left (tshow e)))
 
     process _ (Left s) = logInfoL ["No data: ", s] *> pure 300
     process vid (Right vdata) = do
