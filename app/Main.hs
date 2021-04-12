@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE NamedFieldPuns      #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE RecordWildCards     #-}
@@ -6,14 +7,14 @@
 
 module Main where
 
+import           Control.Lens
 import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (MonadLogger (..))
 import           Control.Monad.Reader       (asks)
-import           Data.Aeson                 (decode, encode)
-import           Data.Bool                  (bool)
+import           Data.Aeson                 (Value, decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import qualified Data.Map.Strict            as Map
@@ -30,6 +31,8 @@ import           UnliftIO                   (TChan, TVar, atomically, newTVarIO,
                                              writeTVar)
 import           UnliftIO.Timeout           (timeout)
 
+import           Tesla
+import           Tesla.Auth
 import           Tesla.AuthDB
 import           Tesla.Car
 import qualified Tesla.Car.Commands         as CMD
@@ -45,14 +48,17 @@ data Options = Options {
   , optMQTTTopic   :: Text
   , optInTopic     :: Text
   , optCMDsEnabled :: Bool
+  , optMQTTProds   :: Text
   }
 
 data State m = State {
   opts     :: Options
-  , prereq :: TVar (Car m (Either Text ()))
+  , prereq :: TVar (VehicleState -> Car m (Either Text ()))
   }
 
-type VSink m = Sink (State m) VehicleData
+data Observation = VData VehicleData | PData Value
+
+type VSink m = Sink (State m) Observation
 
 options :: Parser Options
 options = Options
@@ -64,6 +70,7 @@ options = Options
   <*> strOption (long "mqtt-topic" <> showDefault <> value "tmp/tesla" <> help "MQTT topic")
   <*> strOption (long "listen-topic" <> showDefault <> value "tmp/tesla/in/#" <> help "MQTT listen topics for syncing")
   <*> switch (long "enable-commands" <> help "enable remote commands")
+  <*> strOption (long "product-topic" <> showDefault <> value "tmp/tesla/products" <> help "Raw product topic")
 
 dbSink :: MonadIO m => (VSink m) ()
 dbSink = do
@@ -75,7 +82,9 @@ dbSink = do
     storeThings ch db = do
       dbInit db
 
-      forever $ atomically (readTChan ch) >>= insertVData db
+      forever $ atomically (readTChan ch) >>= \case
+        VData v -> insertVData db v
+        _       -> pure ()
 
 mqttSink :: (MonadLogger m, MonadIO m) => (VSink m) ()
 mqttSink = do
@@ -103,22 +112,28 @@ mqttSink = do
       logInfoL ["disconnected from ", tshow optMQTTURI]
 
     store Options{..} ch unl mc = forever $ do
-      vdata <- atomically $ do
+      obs <- atomically $ do
         connd <- isConnectedSTM mc
         unless connd $ throwM DisconnectedException
         readTChan ch
       void . unl . logDbg $ "Delivering vdata via MQTT"
-      publishq mc optMQTTTopic vdata True QoS2 [PropMessageExpiryInterval 900,
+      case obs of
+        VData v -> do
+          publishq mc optMQTTTopic v True QoS2 [PropMessageExpiryInterval 86400,
                                                 PropContentType "application/json"]
-      unless (isUserPresent vdata) $ idiotCheck (openDoors vdata)
+          unless (isUserPresent v) $ idiotCheck (openDoors v)
+
+          -- idiotCheck == verify state when user not present
+            where idiotCheck [] = pure ()
+                  idiotCheck ds = publishq mc (optMQTTTopic <> "/alert/open")
+                                  ("nobody's there, but the following doors are open: "
+                                   <> (BC.pack . show) ds) False QoS2 []
+        PData p ->
+          let pe = encode p in
+            publishq mc optMQTTProds pe True QoS2 [PropMessageExpiryInterval 900,
+                                                   PropContentType "application/json"]
+
       unl . logDbg $ "Delivered vdata via MQTT"
-
-        -- idiotCheck == verify state when user not present
-        where idiotCheck [] = pure ()
-              idiotCheck ds = publishq mc (optMQTTTopic <> "/alert/open")
-                                       ("nobody's there, but the following doors are open: "
-                                        <> (BC.pack . show) ds) False QoS2 []
-
 
     tdbAPI Options{..} db unl mc t m props = maybe (pure ()) toCall (cmd t)
 
@@ -231,21 +246,21 @@ mqttSink = do
           unl $ logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-checkAwake :: (MonadLogger m, MonadIO m) => Car m (Either Text ())
-checkAwake = bool (Left "not awake") (Right ()) <$> isAwake
+checkAwake :: MonadIO m => VehicleState -> Car m (Either Text ())
+checkAwake VOnline = pure $ Right ()
+checkAwake st      = pure $ Left ("not awake, current status: " <> tshow st)
 
-checkAsleep :: (MonadLogger m, MonadIO m) => TVar (Car m (Either Text ())) -> Car m (Either Text ())
-checkAsleep p = do
-  a <- isAwake
-  if a then pure (Left "not asleep")
-  else atomically $ writeTVar p checkAwake *> pure (Left "transitioned to checkAwake")
+checkAsleep :: MonadIO m => TVar (VehicleState -> Car m (Either Text ())) -> VehicleState -> Car m (Either Text ())
+checkAsleep _ VOnline = pure $ Left "not asleep"
+checkAsleep p _       = atomically $ writeTVar p checkAwake *> pure (Left "transitioned to checkAwake")
 
-gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan VehicleData -> m a
+gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan Observation -> m a
 gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
 
-    timeLoop fetch (process vid)
+    ai <- teslaAuth
+    timeLoop (fetch ai vid) (process vid)
 
   where
     naptime :: VehicleData -> Int
@@ -254,16 +269,19 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
           | isCharging vdata    = 300
           | otherwise           = 900
 
-    fetch = do
+    fetch ai vid = do
+              prods :: Value <- productsRaw ai
+              liftIO . atomically $ writeTChan ch (PData prods)
+              let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
               pa <- (liftIO . atomically . readTVar) pv
-              either (pure . Left) (const vd) =<< pa
+              either (pure . Left) (const vd) =<< pa state
 
     vd = catch (Right <$> vehicleData) (\(e :: SomeException) -> pure (Left (tshow e)))
 
     process _ (Left s) = logInfoL ["No data: ", s] *> pure 300
     process vid (Right vdata) = do
       logInfoL ["Fetched data for vid: ", vid]
-      liftIO . atomically $ writeTChan ch vdata
+      liftIO . atomically $ writeTChan ch (VData vdata)
       let nt = naptime vdata
       logInfoL ["Sleeping for ", tshow nt,
                 " user present: ", tshow $ isUserPresent vdata,
