@@ -19,6 +19,7 @@ import           Data.Aeson.Lens
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Foldable              (asum)
+import           Data.Functor               (($>))
 import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, isJust, mapMaybe)
 import           Data.Text                  (Text)
@@ -29,8 +30,8 @@ import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
-import           UnliftIO                   (TChan, TVar, atomically, mapConcurrently_, newTVarIO, readTChan, readTVar,
-                                             writeTChan, writeTVar)
+import           UnliftIO                   (TChan, TVar, atomically, mapConcurrently_, newTVarIO, readTChan,
+                                             readTVarIO, writeTChan, writeTVar)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
@@ -259,7 +260,7 @@ checkAwake st      = pure $ Left ("not awake, current status: " <> tshow st)
 
 checkAsleep :: MonadIO m => TVar (VehicleState -> Car m (Either Text ())) -> VehicleState -> Car m (Either Text ())
 checkAsleep _ VOnline = pure $ Left "not asleep"
-checkAsleep p _       = atomically $ writeTVar p checkAwake *> pure (Left "transitioned to checkAwake")
+checkAsleep p _       = atomically $ writeTVar p checkAwake $> Left "transitioned to checkAwake"
 
 gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan Observation -> m a
 gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
@@ -280,12 +281,12 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
               prods :: Value <- productsRaw ai
               liftIO . atomically $ writeTChan ch (PData prods)
               let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
-              pa <- (liftIO . atomically . readTVar) pv
+              pa <- (liftIO . readTVarIO) pv
               either (pure . Left) (const vd) =<< pa state
 
     vd = catch (Right <$> vehicleData) (\(e :: SomeException) -> pure (Left (tshow e)))
 
-    process _ (Left s) = logInfoL ["No data: ", s] *> pure 300
+    process _ (Left s) = logInfoL ["No data: ", s] $> 300
     process vid (Right vdata) = do
       logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch (VData vdata)
