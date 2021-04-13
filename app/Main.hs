@@ -54,9 +54,11 @@ data Options = Options {
   , optMQTTProds   :: Text
   }
 
+type PrereqAction m = VehicleState -> Car m (Either Text ())
+
 data State m = State {
   opts     :: Options
-  , prereq :: TVar (VehicleState -> Car m (Either Text ()))
+  , prereq :: TVar (PrereqAction m)
   }
 
 data Observation = VData VehicleData | PData Value
@@ -254,11 +256,11 @@ mqttSink = do
           unl $ logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-checkAwake :: MonadIO m => VehicleState -> Car m (Either Text ())
+checkAwake :: MonadIO m => PrereqAction m
 checkAwake VOnline = pure $ Right ()
 checkAwake st      = pure $ Left ("not awake, current status: " <> tshow st)
 
-checkAsleep :: MonadIO m => TVar (VehicleState -> Car m (Either Text ())) -> VehicleState -> Car m (Either Text ())
+checkAsleep :: MonadIO m => TVar (PrereqAction m) -> PrereqAction m
 checkAsleep _ VOnline = pure $ Left "not asleep"
 checkAsleep p _       = atomically $ writeTVar p checkAwake $> Left "transitioned to checkAwake"
 
@@ -278,7 +280,7 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
           | otherwise           = 900
 
     fetch ai vid = do
-              prods :: Value <- productsRaw ai
+              prods <- productsRaw ai
               liftIO . atomically $ writeTChan ch (PData prods)
               let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
               pa <- (liftIO . readTVarIO) pv
