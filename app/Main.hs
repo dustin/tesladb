@@ -15,10 +15,12 @@ import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (MonadLogger (..))
 import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (Value, decode, encode)
+import           Data.Aeson.Lens
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
+import           Data.Foldable              (asum)
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, fromMaybe, isJust)
+import           Data.Maybe                 (fromJust, fromMaybe, isJust, mapMaybe)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Database.SQLite.Simple     hiding (bind, close)
@@ -27,8 +29,8 @@ import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           Text.Read                  (readMaybe)
-import           UnliftIO                   (TChan, TVar, atomically, newTVarIO, readTChan, readTVar, writeTChan,
-                                             writeTVar)
+import           UnliftIO                   (TChan, TVar, atomically, mapConcurrently_, newTVarIO, readTChan, readTVar,
+                                             writeTChan, writeTVar)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
@@ -128,10 +130,15 @@ mqttSink = do
                   idiotCheck ds = publishq mc (optMQTTTopic <> "/alert/open")
                                   ("nobody's there, but the following doors are open: "
                                    <> (BC.pack . show) ds) False QoS2 []
-        PData p ->
-          let pe = encode p in
-            publishq mc optMQTTProds pe True QoS2 [PropMessageExpiryInterval 900,
-                                                   PropContentType "application/json"]
+        PData p -> mapConcurrently_ (\(k,v) ->
+                                       publishq mc k v True QoS2 [PropMessageExpiryInterval 1800,
+                                                                  PropContentType "application/json"]) (expand p)
+          where
+            expand j = (optMQTTProds, encode j) : mapMaybe aj (j ^.. key "response" . _Array . folded . to enc)
+            aj (Just a, b) = Just (optMQTTProds <> "/" <> a, b)
+            aj _           = Nothing
+            enc v = (akey v, encode v)
+            akey v = asum [v ^? key "id_s" . _String, v ^? key "id" . _String]
 
       unl . logDbg $ "Delivered vdata via MQTT"
 
