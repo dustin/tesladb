@@ -35,7 +35,7 @@ dependencies:
 - network-uri
 - async
 - stm
-- net-mqtt
+- net-mqtt >= 0.8
 - time
 - mtl
 - transformers
@@ -85,7 +85,7 @@ executables:
     - -Wall
     dependencies:
     - tesladb
-    - net-mqtt-rpc
+    - net-mqtt-rpc >= 0.2
 
   tesladbfix:
     main:                Main.hs

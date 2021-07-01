@@ -5,7 +5,6 @@ module Main where
 
 import           Control.Monad              (unless, (<=<))
 import qualified Control.Monad.Catch        as E
-import           Control.Monad.Fail         (MonadFail)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (LogLevel (..), MonadLogger,
@@ -30,6 +29,7 @@ import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
 import qualified Network.MQTT.RPC           as MQTTRPC
 import           Network.MQTT.Types         (RetainHandling (..))
+import           Network.MQTT.Topic
 import           Network.URI
 import           Options.Applicative        (Parser, auto, execParser, fullDesc,
                                              help, helper, info, long,
@@ -44,7 +44,7 @@ import           Tesla.DB
 data Options = Options {
   optDBPath         :: String
   , optMQTTURI      :: URI
-  , optMQTTTopic    :: Text
+  , optMQTTTopic    :: Filter
   , optNoBackfill   :: Bool
   , optSessionTime  :: Word32
   , optCleanSession :: Bool
@@ -111,8 +111,8 @@ tryInsert db vd = E.catch (liftIO $ insertVData db vd)
                   (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
                                             lstr (ex :: SQLError)])
 
-backfill :: (MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m) => Connection -> MQTTClient -> Topic -> m ()
-backfill db mc dtopic = do
+backfill :: (MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m) => Connection -> MQTTClient -> Filter -> m ()
+backfill db mc dfilter = do
   logInfo "Beginning backfill"
   (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> liftIO (listDays db))
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
@@ -127,7 +127,8 @@ backfill db mc dtopic = do
       remoteDay :: (MonadLogger m, MonadIO m) => BL.ByteString -> m (Maybe (Set UTCTime))
       remoteDay d = decode <$> MQTTRPC.call mc (topic "day") d
 
-      topic x = dropWhileEnd (/= '/') dtopic <> "in/" <> x
+      Just tbase = mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
+      topic = ((tbase <> "in") <>)
       doDay d = do
         logInfo $ mconcat ["Backfilling ", pack d]
         (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> liftIO (listDay db d))

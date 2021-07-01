@@ -26,6 +26,7 @@ import           Data.Text                  (Text)
 import qualified Data.Text                  as T
 import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
+import           Network.MQTT.Topic
 import           Network.URI
 import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
                                              option, progDesc, short, showDefault, strOption, switch, value, (<**>))
@@ -48,10 +49,10 @@ data Options = Options {
   , optNoMQTT      :: Bool
   , optVerbose     :: Bool
   , optMQTTURI     :: URI
-  , optMQTTTopic   :: Text
-  , optInTopic     :: Text
+  , optMQTTTopic   :: Topic
+  , optInTopic     :: Filter
   , optCMDsEnabled :: Bool
-  , optMQTTProds   :: Text
+  , optMQTTProds   :: Topic
   }
 
 type PrereqAction m = VehicleState -> Car m (Either Text ())
@@ -138,10 +139,10 @@ mqttSink = do
                                                                   PropContentType "application/json"]) (expand p)
           where
             expand j = (optMQTTProds, encode j) : mapMaybe aj (j ^.. key "response" . _Array . folded . to enc)
-            aj (Just a, b) = Just (optMQTTProds <> "/" <> a, b)
+            aj (Just a, b) = Just (optMQTTProds <> a, b)
             aj _           = Nothing
             enc v = (akey v, encode v)
-            akey v = asum [v ^? key "id_s" . _String, v ^? key "id" . _String]
+            akey v = maybe Nothing mkTopic (asum [v ^? key "id_s" . _String, v ^? key "id" . _String])
 
       unl . logDbg $ "Delivered vdata via MQTT"
 
@@ -156,10 +157,10 @@ mqttSink = do
               respond ret "timed out" []
             Just _  -> pure ()
 
-        cmd = T.stripPrefix (T.dropWhileEnd (== '#') optInTopic)
+        cmd = T.stripPrefix (T.dropWhileEnd (== '#') (unFilter optInTopic)) . unTopic
 
-        ret = blToText . foldr f "" $ props
-          where f (PropResponseTopic r) _ = r
+        ret = foldr f Nothing $ props
+          where f (PropResponseTopic r) _ = mkTopic . blToText $ r
                 f _                     o = o
 
         rprops = filter f props
@@ -168,9 +169,9 @@ mqttSink = do
             f PropUserProperty{}    = True
             f _                     = False
 
-        respond :: MonadIO m => Text -> BL.ByteString -> [Property] -> m ()
-        respond "" _  _  = pure ()
-        respond rt rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
+        respond :: MonadIO m => Maybe Topic -> BL.ByteString -> [Property] -> m ()
+        respond Nothing _  _  = pure ()
+        respond (Just rt) rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
         callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
           logInfoL ["Command requested: ", cmdname]
@@ -233,7 +234,7 @@ mqttSink = do
 
         -- All RPCs below require a response topic.
 
-        call p "" _ = unl $ logInfoL ["request to ", tshow p, " with no response topic"]
+        call p Nothing _ = unl $ logInfoL ["request to ", tshow p, " with no response topic"]
 
         call "days" res _ = do
           unl $ logInfoL ["Days call responding to ", tshow res]
