@@ -1,6 +1,10 @@
 name: "Nix Build"
 on:
+  workflow_dispatch:
   push:
+    branches: [ master ]
+  schedule:
+  - cron: "3 11 13,27 * *"
 jobs:
   tests:
     runs-on: ubuntu-latest
