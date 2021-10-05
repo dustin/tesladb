@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 
@@ -7,9 +8,9 @@ import           Control.Monad              (unless, (<=<))
 import qualified Control.Monad.Catch        as E
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), MonadLogger,
-                                             filterLogger, logWithoutLoc,
+import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logWithoutLoc,
                                              runStderrLoggingT)
+import           Control.Monad.Reader       (MonadReader, ReaderT, asks, runReaderT)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -25,21 +26,18 @@ import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
 import           Data.Time.LocalTime        (getCurrentTimeZone, utcToLocalTime)
 import           Data.Word                  (Word32)
-import           Database.SQLite.Simple     hiding (bind, close)
+import qualified Database.SQLite.Simple     as SQLite
 import           Network.MQTT.Client
 import qualified Network.MQTT.RPC           as MQTTRPC
-import           Network.MQTT.Types         (RetainHandling (..))
 import           Network.MQTT.Topic
+import           Network.MQTT.Types         (RetainHandling (..))
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc,
-                                             help, helper, info, long,
-                                             maybeReader, option, progDesc,
-                                             short, showDefault, strOption,
-                                             switch, value, (<**>))
+import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
+                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
 import           UnliftIO.Async             (concurrently, mapConcurrently_)
 
 import           Tesla.Car
-import           Tesla.DB
+import qualified Tesla.DB                   as DB
 
 data Options = Options {
   optDBPath         :: String
@@ -50,6 +48,17 @@ data Options = Options {
   , optCleanSession :: Bool
   , optVerbose      :: Bool
   }
+
+class MonadIO m => Persistence m where
+  listDays :: m [(String,Int)]
+  listDay  :: m [UTCTime]
+  insertVData :: VehicleData -> m ()
+
+data SQLiteEnv = SQLiteEnv {
+  sqliteConn :: SQLite.Connection
+  }
+
+type Sink = ReaderT SQLiteEnv (LoggingT IO)
 
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
@@ -106,18 +115,20 @@ logData vd = unless (up || null od) $ logInfo $ mconcat [
     od = openDoors vd
     ts = teslaTS vd
 
-tryInsert :: (MonadLogger m, E.MonadCatch m, MonadIO m) => Connection -> VehicleData -> m ()
-tryInsert db vd = E.catch (liftIO $ insertVData db vd)
-                  (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
-                                            lstr (ex :: SQLError)])
+tryInsert :: (MonadReader SQLiteEnv m, MonadLogger m, E.MonadCatch m, MonadIO m)
+          => VehicleData -> m ()
+tryInsert vd = asks sqliteConn >>= \db -> E.catch (liftIO $ DB.insertVData db vd)
+                                          (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
+                                                                    lstr (ex :: SQLite.SQLError)])
 
-backfill :: (MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m) => Connection -> MQTTClient -> Filter -> m ()
-backfill db mc dfilter = do
+backfill :: (MonadReader SQLiteEnv m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
+         => MQTTClient -> Filter -> m ()
+backfill mc dfilter = asks sqliteConn >>= \db -> do
   logInfo "Beginning backfill"
-  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> liftIO (listDays db))
+  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> liftIO (DB.listDays db))
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
-  traverse_ doDay dayDiff
+  traverse_ (doDay db) dayDiff
   logInfo "Backfill complete"
 
     where
@@ -129,9 +140,9 @@ backfill db mc dfilter = do
 
       Just tbase = mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
       topic = ((tbase <> "in") <>)
-      doDay d = do
+      doDay db d = do
         logInfo $ mconcat ["Backfilling ", pack d]
-        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> liftIO (listDay db d))
+        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> liftIO (DB.listDay db d))
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
         logDbg $ mconcat ["missing: ", lstr missing]
@@ -144,34 +155,34 @@ backfill db mc dfilter = do
         logDbg $ mconcat ["Fetching remote data from ", lstr ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
-        tryInsert db vd
+        tryInsert vd
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
 run :: Options -> IO ()
-run opts@Options{..} = runStderrLoggingT . logfilt $
-  withRunInIO $ \unl -> withConnection optDBPath (storeThings unl)
+run opts@Options{..} = SQLite.withConnection optDBPath $ \db -> do
+  flip runReaderT (SQLiteEnv db) . runStderrLoggingT . logfilt $ withRunInIO $ \unl -> storeThings unl db
 
   where
     logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
 
-    sink db unl _ _ m _ = do
+    sink unl _ _ m _ = do
       tz <- getCurrentTimeZone
       let lt = utcToLocalTime tz . teslaTS $ m
       unl $ do
         logDbg $ mconcat ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
         logData m
-        tryInsert db m
+        tryInsert m
 
     storeThings unl db = do
-      dbInit db
+      DB.dbInit db
 
-      unl $ withMQTT opts (sink db unl) $ \mc -> do
+      unl $ withMQTT opts (sink unl) $ \mc -> do
         subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
                                                                  _retainHandling=SendOnSubscribeNew})] []
         logDbg $ mconcat ["Sub response: ", lstr subr]
 
-        unless optNoBackfill $ backfill db mc optMQTTTopic
+        unless optNoBackfill $ backfill mc optMQTTTopic
 
         liftIO $ waitForClient mc
 
