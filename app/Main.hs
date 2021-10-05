@@ -40,7 +40,7 @@ import           Tesla.Auth
 import           Tesla.AuthDB
 import           Tesla.Car
 import qualified Tesla.Car.Commands         as CMD
-import           Tesla.DB
+import           Tesla.SqliteDB
 import           Tesla.Runner
 
 data Options = Options {

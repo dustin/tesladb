@@ -38,7 +38,7 @@ import           Options.Applicative        (Parser, auto, execParser, fullDesc,
 import           UnliftIO.Async             (concurrently, mapConcurrently_)
 
 import           Tesla.Car
-import qualified Tesla.DB                   as DB
+import qualified Tesla.SqliteDB                   as SDB
 
 data Options = Options {
   optDBPath         :: String
@@ -66,9 +66,9 @@ newtype SQLiteP a = SqliteP {
                           MonadReader SQLiteEnv)
 
 instance Persistence SQLiteP where
-  listDays = asks sqliteConn >>= liftIO . DB.listDays
-  listDay d = asks sqliteConn >>= \db -> liftIO $ DB.listDay db d
-  insertVData d = asks sqliteConn >>= \db -> liftIO $ DB.insertVData db d
+  listDays = asks sqliteConn >>= liftIO . SDB.listDays
+  listDay d = asks sqliteConn >>= \db -> liftIO $ SDB.listDay db d
+  insertVData d = asks sqliteConn >>= \db -> liftIO $ SDB.insertVData db d
 
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
@@ -186,7 +186,7 @@ run opts@Options{..} = SQLite.withConnection optDBPath $ \db -> do
         tryInsert m
 
     storeThings unl db = do
-      DB.dbInit db
+      SDB.dbInit db
 
       unl $ withMQTT opts (sink unl) $ \mc -> do
         subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
