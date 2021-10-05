@@ -5,40 +5,52 @@
 
 module Main where
 
-import           Control.Monad              (unless, (<=<))
-import qualified Control.Monad.Catch        as E
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (LogLevel (..), LoggingT, MonadLogger, filterLogger, logWithoutLoc,
-                                             runStderrLoggingT)
-import           Control.Monad.Reader       (MonadReader, ReaderT, asks, runReaderT)
-import           Data.Aeson                 (decode, encode)
-import qualified Data.ByteString.Lazy       as BL
-import qualified Data.ByteString.Lazy.Char8 as BC
-import           Data.Foldable              (traverse_)
-import           Data.Map.Strict            (Map)
-import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust)
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
-import           Data.Text                  (Text, dropWhileEnd, pack)
-import qualified Data.Text.Encoding         as TE
-import           Data.Time.Clock            (UTCTime)
-import           Data.Time.Format           (defaultTimeLocale, formatTime)
-import           Data.Time.LocalTime        (getCurrentTimeZone, utcToLocalTime)
-import           Data.Word                  (Word32)
-import qualified Database.SQLite.Simple     as SQLite
+import           Control.Monad                        (unless, (<=<))
+import qualified Control.Monad.Catch                  as E
+import           Control.Monad.IO.Class               (MonadIO (..))
+import           Control.Monad.IO.Unlift              (MonadUnliftIO, withRunInIO)
+import           Control.Monad.Logger                 (LogLevel (..), LoggingT, MonadLogger, filterLogger,
+                                                       logWithoutLoc, runStderrLoggingT)
+import           Control.Monad.Reader                 (MonadReader, ReaderT, asks, runReaderT)
+import           Data.Aeson                           (decode, encode)
+import qualified Data.ByteString.Char8                as BCS
+import qualified Data.ByteString.Lazy                 as BL
+import qualified Data.ByteString.Lazy.Char8           as BC
+import           Data.Foldable                        (fold, traverse_)
+import           Data.List                            (intercalate, sortOn)
+import           Data.Map.Strict                      (Map)
+import qualified Data.Map.Strict                      as Map
+import           Data.Maybe                           (fromJust)
+import           Data.Set                             (Set)
+import qualified Data.Set                             as Set
+import           Data.Text                            (Text, dropWhileEnd, pack)
+import qualified Data.Text.Encoding                   as TE
+import           Data.Time.Clock                      (UTCTime)
+import           Data.Time.Format                     (defaultTimeLocale, formatTime)
+import           Data.Time.LocalTime                  (getCurrentTimeZone, utcToLocalTime)
+import           Data.Word                            (Word32)
+import qualified Database.PostgreSQL.Simple           as PG
+import qualified Database.SQLite.Simple               as SQLite
 import           Network.MQTT.Client
-import qualified Network.MQTT.RPC           as MQTTRPC
+import qualified Network.MQTT.RPC                     as MQTTRPC
 import           Network.MQTT.Topic
-import           Network.MQTT.Types         (RetainHandling (..))
+import           Network.MQTT.Types                   (RetainHandling (..))
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
-                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
-import           UnliftIO.Async             (concurrently, mapConcurrently_)
+import           Options.Applicative                  (Parser, auto, eitherReader, execParser, fullDesc, help, helper,
+                                                       info, long, maybeReader, option, progDesc, short, showDefault,
+                                                       strOption, switch, value, (<**>))
+import           Options.Applicative.Help.Levenshtein (editDistance)
+import           UnliftIO.Async                       (concurrently, mapConcurrently_)
 
 import           Tesla.Car
-import qualified Tesla.SqliteDB                   as SDB
+import qualified Tesla.PostgresDB                     as PDB
+import qualified Tesla.SqliteDB                       as SDB
+
+data DBType = DBSQLite | DBPostgres deriving Eq
+
+instance Show DBType where
+  show DBSQLite   = "sqlite"
+  show DBPostgres = "postgres"
 
 data Options = Options {
   optDBPath         :: String
@@ -48,9 +60,11 @@ data Options = Options {
   , optSessionTime  :: Word32
   , optCleanSession :: Bool
   , optVerbose      :: Bool
+  , optDBType       :: DBType
   }
 
 class MonadIO m => Persistence m where
+  dbInit :: m ()
   listDays :: m [(String,Int)]
   listDay  :: String -> m [UTCTime]
   insertVData :: VehicleData -> m ()
@@ -66,9 +80,26 @@ newtype SQLiteP a = SqliteP {
                           MonadReader SQLiteEnv)
 
 instance Persistence SQLiteP where
+  dbInit = asks sqliteConn >>= liftIO . SDB.dbInit
   listDays = asks sqliteConn >>= liftIO . SDB.listDays
   listDay d = asks sqliteConn >>= \db -> liftIO $ SDB.listDay db d
   insertVData d = asks sqliteConn >>= \db -> liftIO $ SDB.insertVData db d
+
+newtype PGEnv = PGEnv {
+  pgConn :: PG.Connection
+  }
+
+newtype PostgresP a = PostgresP {
+  runPG :: ReaderT PGEnv (LoggingT IO) a }
+                    deriving (Applicative, Functor, Monad, MonadIO, MonadLogger, MonadFail,
+                              E.MonadThrow, E.MonadCatch, E.MonadMask, MonadUnliftIO,
+                              MonadReader PGEnv)
+
+instance Persistence PostgresP where
+  dbInit = asks pgConn >>= liftIO . PDB.dbInit
+  listDays = asks pgConn >>= liftIO . PDB.listDays
+  listDay d = asks pgConn >>= \db -> liftIO $ PDB.listDay db d
+  insertVData d = asks pgConn >>= \db -> liftIO $ PDB.insertVData db d
 
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
@@ -82,6 +113,17 @@ options = Options
   <*> option auto (long "session-expiry" <> showDefault <> value 3600 <> help "Session expiration")
   <*> switch (long "clean-session" <> help "Clean the MQTT session")
   <*> switch (short 'v' <> long "verbose" <> help "enable debug logging")
+  <*> option dbtype (short 'd' <> long "db type" <> showDefault
+                     <> value DBSQLite <> help "database type")
+
+  where
+    dbs = [("sqlite", DBSQLite),
+            ("postgres", DBPostgres)]
+    dbtype = eitherReader $ \s -> maybe (Left (inv "db type" s (fst <$> dbs))) Right $ lookup s dbs
+    bestMatch n = head . sortOn (editDistance n)
+    inv t v vs = fold ["invalid ", t, ": ", show v, ", perhaps you meant: ", bestMatch v vs,
+                        "\nValid values:  ", intercalate ", " vs]
+
 
 logAt :: MonadLogger m => LogLevel -> Text -> m ()
 logAt = logWithoutLoc ""
@@ -127,9 +169,11 @@ logData vd = unless (up || null od) $ logInfo $ mconcat [
 
 tryInsert :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadIO m)
           => VehicleData -> m ()
-tryInsert vd = E.catch (insertVData vd)
-               (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
-                                          lstr (ex :: SQLite.SQLError)])
+tryInsert vd = E.catches (insertVData vd) [
+  E.Handler (\ex -> report (ex :: SQLite.SQLError)),
+  E.Handler (\ex -> report (ex :: PG.SqlError))
+  ]
+  where report es = logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr es]
 
 backfill :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
          => MQTTClient -> Filter -> m ()
@@ -169,33 +213,41 @@ backfill mc dfilter = do
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
+storeThings :: (Persistence m, E.MonadMask m, MonadLogger m, MonadFail m, MonadUnliftIO m)
+            => Options -> (m () -> IO ()) -> IO ()
+storeThings opts@Options{..} unl = do
+  unl dbInit
+
+  unl $ withMQTT opts sink $ \mc -> do
+    subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
+                                                             _retainHandling=SendOnSubscribeNew})] []
+    logDbg $ mconcat ["Sub response: ", lstr subr]
+
+    unless optNoBackfill $ backfill mc optMQTTTopic
+
+    liftIO $ waitForClient mc
+
+      where
+        sink _ _ m _ = do
+          tz <- getCurrentTimeZone
+          let lt = utcToLocalTime tz . teslaTS $ m
+          unl $ do
+            logDbg $ mconcat ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
+            logData m
+            tryInsert m
+
 run :: Options -> IO ()
-run opts@Options{..} = SQLite.withConnection optDBPath $ \db -> do
-  runEnv (SQLiteEnv db) $ withRunInIO $ \unl -> storeThings unl db
-
+run opts@Options{..} = runDB optDBType
   where
-    runEnv e m = runStderrLoggingT . logfilt $ runReaderT (runSQLiteP m) e
-    logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
+    runDB DBSQLite   = runSQLite $ withRunInIO (storeThings opts)
+    runDB DBPostgres = runPostgres $ withRunInIO (storeThings opts)
+    runSQLite a = SQLite.withConnection optDBPath $ \db -> runEnv runSQLiteP (SQLiteEnv db) $ a
+    runPostgres a = PDB.withDB (BCS.pack optDBPath) $ \db -> runEnv runPG (PGEnv db) $ a
 
-    sink unl _ _ m _ = do
-      tz <- getCurrentTimeZone
-      let lt = utcToLocalTime tz . teslaTS $ m
-      unl $ do
-        logDbg $ mconcat ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
-        logData m
-        tryInsert m
-
-    storeThings unl db = do
-      SDB.dbInit db
-
-      unl $ withMQTT opts (sink unl) $ \mc -> do
-        subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
-                                                                 _retainHandling=SendOnSubscribeNew})] []
-        logDbg $ mconcat ["Sub response: ", lstr subr]
-
-        unless optNoBackfill $ backfill mc optMQTTTopic
-
-        liftIO $ waitForClient mc
+    runEnv :: MonadIO m => (t -> ReaderT r (LoggingT m) a) -> r -> t -> m a
+    runEnv runp e m = runStderrLoggingT . logfilt $ runReaderT (runp m) e
+      where
+        logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
 
 main :: IO ()
 main = run =<< execParser opts
