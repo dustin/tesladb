@@ -1,6 +1,7 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
 
 module Main where
 
@@ -51,14 +52,23 @@ data Options = Options {
 
 class MonadIO m => Persistence m where
   listDays :: m [(String,Int)]
-  listDay  :: m [UTCTime]
+  listDay  :: String -> m [UTCTime]
   insertVData :: VehicleData -> m ()
 
-data SQLiteEnv = SQLiteEnv {
+newtype SQLiteEnv = SQLiteEnv {
   sqliteConn :: SQLite.Connection
   }
 
-type Sink = ReaderT SQLiteEnv (LoggingT IO)
+newtype SQLiteP a = SqliteP {
+  runSQLiteP :: ReaderT SQLiteEnv (LoggingT IO) a }
+                deriving (Applicative, Functor, Monad, MonadIO, MonadLogger, MonadFail,
+                          E.MonadThrow, E.MonadCatch, E.MonadMask, MonadUnliftIO,
+                          MonadReader SQLiteEnv)
+
+instance Persistence SQLiteP where
+  listDays = asks sqliteConn >>= liftIO . DB.listDays
+  listDay d = asks sqliteConn >>= \db -> liftIO $ DB.listDay db d
+  insertVData d = asks sqliteConn >>= \db -> liftIO $ DB.insertVData db d
 
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
@@ -115,20 +125,20 @@ logData vd = unless (up || null od) $ logInfo $ mconcat [
     od = openDoors vd
     ts = teslaTS vd
 
-tryInsert :: (MonadReader SQLiteEnv m, MonadLogger m, E.MonadCatch m, MonadIO m)
+tryInsert :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadIO m)
           => VehicleData -> m ()
-tryInsert vd = asks sqliteConn >>= \db -> E.catch (liftIO $ DB.insertVData db vd)
-                                          (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
-                                                                    lstr (ex :: SQLite.SQLError)])
+tryInsert vd = E.catch (insertVData vd)
+               (\ex -> logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ",
+                                          lstr (ex :: SQLite.SQLError)])
 
-backfill :: (MonadReader SQLiteEnv m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
+backfill :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
          => MQTTClient -> Filter -> m ()
-backfill mc dfilter = asks sqliteConn >>= \db -> do
+backfill mc dfilter = do
   logInfo "Beginning backfill"
-  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> liftIO (DB.listDays db))
+  (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> listDays)
   let dayDiff = Map.keys $ Map.differenceWith (\a b -> if a == b then Nothing else Just a) rdays ldays
 
-  traverse_ (doDay db) dayDiff
+  traverse_ doDay dayDiff
   logInfo "Backfill complete"
 
     where
@@ -140,9 +150,9 @@ backfill mc dfilter = asks sqliteConn >>= \db -> do
 
       Just tbase = mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
       topic = ((tbase <> "in") <>)
-      doDay db d = do
+      doDay d = do
         logInfo $ mconcat ["Backfilling ", pack d]
-        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> liftIO (DB.listDay db d))
+        (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay d)
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
         logDbg $ mconcat ["missing: ", lstr missing]
@@ -161,9 +171,10 @@ backfill mc dfilter = asks sqliteConn >>= \db -> do
 
 run :: Options -> IO ()
 run opts@Options{..} = SQLite.withConnection optDBPath $ \db -> do
-  flip runReaderT (SQLiteEnv db) . runStderrLoggingT . logfilt $ withRunInIO $ \unl -> storeThings unl db
+  runEnv (SQLiteEnv db) $ withRunInIO $ \unl -> storeThings unl db
 
   where
+    runEnv e m = runStderrLoggingT . logfilt $ runReaderT (runSQLiteP m) e
     logfilt = filterLogger (\_ -> flip (if optVerbose then (>=) else (>)) LevelDebug)
 
     sink unl _ _ m _ = do
