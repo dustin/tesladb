@@ -13,7 +13,7 @@ import           Database.PostgreSQL.Simple
 import           Tesla.Car                  (VehicleData, teslaTS)
 
 dbInit :: Connection -> IO ()
-dbInit db = void $ execute_ db "create table if not exists data (ts timestamp primary key, data text)"
+dbInit db = void $ execute_ db "create table if not exists data (ts timestamp primary key, data json)"
 
 insertVData :: Connection -> VehicleData -> IO ()
 insertVData db vdata = void $ execute db "insert into data(ts, data) values(?, ?)" (teslaTS vdata, vdata)
