@@ -18,7 +18,7 @@ dbInit :: Connection -> IO ()
 dbInit db = void $ execute_ db [sql|
                                    create table data (
                                      ts timestamp not null primary key,
-                                     vts timestamp generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored,
+                                     vts timestamptz generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored,
                                      data json
                                    )
                                    |]
