@@ -40,8 +40,8 @@ import           Tesla.Auth
 import           Tesla.AuthDB
 import           Tesla.Car
 import qualified Tesla.Car.Commands         as CMD
-import           Tesla.SqliteDB
 import           Tesla.Runner
+import           Tesla.SqliteDB
 
 data Options = Options {
   optDBPath        :: FilePath
@@ -170,7 +170,7 @@ mqttSink = do
             f _                     = False
 
         respond :: MonadIO m => Maybe Topic -> BL.ByteString -> [Property] -> m ()
-        respond Nothing _  _  = pure ()
+        respond Nothing _  _    = pure ()
         respond (Just rt) rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
         callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
@@ -250,8 +250,8 @@ mqttSink = do
           unl $ logInfoL ["Fetch call for ", tshow tss, " responding to ", tshow res]
           let mts = decode ("\"" <> tss <> "\"")
           guard $ isJust mts
-          vdata <- fetchDatum db (fromJust mts)
-          respond res vdata [PropContentType "application/json"]
+          v <- fetchDatum db (fromJust mts)
+          respond res v [PropContentType "application/json"]
 
         call x res _ = do
           unl $ logInfoL ["Call to invalid path: ", tshow x]
@@ -275,10 +275,10 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
 
   where
     naptime :: VehicleData -> Int
-    naptime vdata
-          | isUserPresent vdata =  60
-          | isCharging vdata    = 300
-          | otherwise           = 900
+    naptime v
+          | isUserPresent v =  60
+          | isCharging v    = 300
+          | otherwise       = 900
 
     fetch ai vid = do
               prods <- productsRaw ai
@@ -290,13 +290,13 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
     vd = catch (Right <$> vehicleData) (\(e :: SomeException) -> pure (Left (tshow e)))
 
     process _ (Left s) = logInfoL ["No data: ", s] $> 300
-    process vid (Right vdata) = do
+    process vid (Right v) = do
       logInfoL ["Fetched data for vid: ", vid]
-      liftIO . atomically $ writeTChan ch (VData vdata)
-      let nt = naptime vdata
+      liftIO . atomically $ writeTChan ch (VData v)
+      let nt = naptime v
       logInfoL ["Sleeping for ", tshow nt,
-                " user present: ", tshow $ isUserPresent vdata,
-                ", charging: ", tshow $ isCharging vdata]
+                " user present: ", tshow $ isUserPresent v,
+                ", charging: ", tshow $ isCharging v]
       pure nt
 
 run :: Options -> IO ()

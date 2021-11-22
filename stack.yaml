@@ -38,9 +38,10 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- tesla-0.4.1.2
+- tesla-0.5.0.0
 - net-mqtt-0.8.0.0@sha256:8e7399d782ecd2edc9e58534f58e881a621ebd64fa10f28c3791b5f170df2385,4146
 - net-mqtt-rpc-0.2.0.0@sha256:897ee408ee7f12d44e1afaa1bfda3a403d33394ee4f70f76f0e2a0c2df561a12,1757
+- network-3.1.2.5@sha256:433a5e076aaa8eb3e4158abae78fb409c6bd754e9af99bc2e87583d2bcd8404a,4888
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
