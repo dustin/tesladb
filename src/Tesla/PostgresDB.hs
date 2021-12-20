@@ -16,7 +16,7 @@ import           Tesla.Car                        (VehicleData, teslaTS)
 
 dbInit :: Connection -> IO ()
 dbInit db = void $ execute_ db [sql|
-                                   create table data (
+                                   create table if not exists data (
                                      ts timestamp not null primary key,
                                      vts timestamptz generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored,
                                      data json
