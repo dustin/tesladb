@@ -156,11 +156,11 @@ withMQTT Options{..} cb = E.bracket conn (liftIO . normalDisconnect)
                                                        PropRequestProblemInformation 1]}
             optMQTTURI
       ack <- liftIO $ connACK mc
-      logDbg $ mconcat ["MQTT connected: ", lstr ack]
+      logDbg $ fold ["MQTT connected: ", lstr ack]
       pure mc
 
 logData :: (MonadIO m, MonadLogger m) => VehicleData -> m ()
-logData vd = unless (up || null od) $ logInfo $ mconcat [
+logData vd = unless (up || null od) $ logInfo $ fold [
   "User is not present, but the following doors are open at ", lstr ts, ": ", lstr od]
   where
     up = isUserPresent vd
@@ -173,7 +173,7 @@ tryInsert vd = E.catches (insertVData vd) [
   E.Handler (\ex -> report (ex :: SQLite.SQLError)),
   E.Handler (\ex -> report (ex :: PG.SqlError))
   ]
-  where report es = logErr $ mconcat ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr es]
+  where report es = logErr $ fold ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr es]
 
 backfill :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
          => MQTTClient -> Filter -> m ()
@@ -195,18 +195,18 @@ backfill mc dfilter = do
       Just tbase = mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
       topic = ((tbase <> "in") <>)
       doDay d = do
-        logInfo $ mconcat ["Backfilling ", pack d]
+        logInfo $ fold ["Backfilling ", pack d]
         (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay d)
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
-        logDbg $ mconcat ["missing: ", lstr missing]
-        logDbg $ mconcat ["extra: ", lstr extra]
+        logDbg $ fold ["missing: ", lstr missing]
+        logDbg $ fold ["extra: ", lstr extra]
 
         mapConcurrently_ doOne missing
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
-        logDbg $ mconcat ["Fetching remote data from ", lstr ts]
+        logDbg $ fold ["Fetching remote data from ", lstr ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
         tryInsert vd
@@ -221,7 +221,7 @@ storeThings opts@Options{..} unl = do
   unl $ withMQTT opts sink $ \mc -> do
     subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
                                                              _retainHandling=SendOnSubscribeNew})] []
-    logDbg $ mconcat ["Sub response: ", lstr subr]
+    logDbg $ fold ["Sub response: ", lstr subr]
 
     unless optNoBackfill $ backfill mc optMQTTTopic
 
@@ -232,7 +232,7 @@ storeThings opts@Options{..} unl = do
           tz <- getCurrentTimeZone
           let lt = utcToLocalTime tz . teslaTS $ m
           unl $ do
-            logDbg $ mconcat ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
+            logDbg $ fold ["Received data ", pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q %Z" lt]
             logData m
             tryInsert m
 
