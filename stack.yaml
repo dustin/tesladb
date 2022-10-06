@@ -39,7 +39,7 @@ packages:
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - tesla-0.5.1.0
-- net-mqtt-0.8.2.3
+- net-mqtt-0.8.2.4
 - net-mqtt-rpc-0.2.0.0@sha256:897ee408ee7f12d44e1afaa1bfda3a403d33394ee4f70f76f0e2a0c2df561a12,1757
 - lens-aeson-1.2.2@sha256:9a90da3716f0148b14e036b52091192bcd567754b157d66dd225945f04ace0f9,1611
 
