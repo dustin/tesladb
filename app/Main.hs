@@ -142,7 +142,7 @@ mqttSink = do
             aj (Just a, b) = Just (optMQTTProds <> a, b)
             aj _           = Nothing
             enc v = (akey v, encode v)
-            akey v = maybe Nothing mkTopic (asum [v ^? key "id_s" . _String, v ^? key "id" . _String])
+            akey v = mkTopic =<< asum [v ^? key "id_s" . _String, v ^? key "id" . _String]
 
       unl . logDbg $ "Delivered vdata via MQTT"
 
@@ -159,7 +159,7 @@ mqttSink = do
 
         cmd = T.stripPrefix (T.dropWhileEnd (== '#') (unFilter optInTopic)) . unTopic
 
-        ret = foldr f Nothing $ props
+        ret = foldr f Nothing props
           where f (PropResponseTopic r) _ = mkTopic . blToText $ r
                 f _                     o = o
 
