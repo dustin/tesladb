@@ -17,7 +17,7 @@
 #
 # resolver: ./custom-snapshot.yaml
 # resolver: https://example.com/snapshots/2018-01-01.yaml
-resolver: lts-19.27
+resolver: lts-20.18
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.
@@ -38,10 +38,8 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- tesla-0.5.1.0
-- net-mqtt-0.8.2.4
-- net-mqtt-rpc-0.2.0.0@sha256:897ee408ee7f12d44e1afaa1bfda3a403d33394ee4f70f76f0e2a0c2df561a12,1757
-- lens-aeson-1.2.2@sha256:9a90da3716f0148b14e036b52091192bcd567754b157d66dd225945f04ace0f9,1611
+- tesla-0.5.2.0
+- net-mqtt-rpc-0.2.0.1@sha256:3ea17728105b0bb82d0f210473530c6cb4290dab518041b91dfd8192946e3a88,1757
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
