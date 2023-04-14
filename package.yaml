@@ -45,7 +45,7 @@ dependencies:
 - vector
 - exceptions
 - monad-logger
-- tesla
+- tesla >= 0.5.2.1
 
 library:
   source-dirs: src
