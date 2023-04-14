@@ -8,7 +8,7 @@ import           Database.SQLite.Simple hiding (bind, close)
 import           Tesla.Auth             (AuthInfo (..), AuthResponse (..), fromToken)
 
 instance ToRow AuthResponse where
-  toRow (AuthResponse tok expiry refresh) = toRow (tok, expiry, refresh)
+  toRow (AuthResponse tok expiry refresh) = toRow (tok, refresh, expiry)
 
 instance FromRow AuthResponse where
   fromRow = AuthResponse <$> field <*> field <*> field
