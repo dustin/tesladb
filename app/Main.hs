@@ -38,15 +38,8 @@ import           UnliftIO.Timeout           (timeout)
 import           Tesla
 import           Tesla.Auth
 import           Tesla.AuthDB
-import Tesla.Car
-    ( currentVehicleID,
-      isCharging,
-      isUserPresent,
-      openDoors,
-      runNamedCar,
-      vehicleData,
-      Car,
-      VehicleData )
+import           Tesla.Car                  (Car, VehicleData, currentVehicleID, isCharging, isUserPresent, openDoors,
+                                             runNamedCar, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.Runner
 import           Tesla.SqliteDB
@@ -66,8 +59,9 @@ data Options = Options {
 type PrereqAction m = VehicleState -> Car m (Either Text ())
 
 data State m = State {
-  opts     :: Options
-  , prereq :: TVar (PrereqAction m)
+  opts      :: Options
+  , prereq  :: TVar (PrereqAction m)
+  , loopRug :: TVar Bool
   }
 
 data Observation = VData VehicleData | PData Value
@@ -104,15 +98,16 @@ mqttSink :: (MonadLogger m, MonadIO m) => (VSink m) ()
 mqttSink = do
   opts@Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
-  withRunInIO $ \unl -> withConnection optDBPath (\db -> withMQTT db opts unl (store opts ch unl))
+  rug <- asks (loopRug . _sink_options)
+  withRunInIO $ \unl -> withConnection optDBPath (\db -> withMQTT db opts rug unl (store opts ch unl))
 
   where
-    withMQTT db opts unl = bracket (connect db opts unl) (disco opts unl)
+    withMQTT db opts rug unl = bracket (connect db opts rug unl) (disco opts unl)
 
-    connect db opts@Options{..} unl = do
+    connect db opts@Options{..} rug unl = do
       unl $ logInfoL ["Connecting to ", tshow optMQTTURI]
       mc <- connectURI mqttConfig{_protocol=Protocol50,
-                                  _msgCB=SimpleCallback (tdbAPI opts db unl)} optMQTTURI
+                                  _msgCB=SimpleCallback (tdbAPI opts db rug unl)} optMQTTURI
       props <- svrProps mc
       unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
       subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
@@ -154,7 +149,7 @@ mqttSink = do
 
       unl . logDbg $ "Delivered vdata via MQTT"
 
-    tdbAPI Options{..} db unl mc t m props = maybe (pure ()) toCall (cmd t)
+    tdbAPI Options{..} db rug unl mc t m props = maybe (pure ()) toCall (cmd t)
 
       where
         toCall p = do
@@ -200,6 +195,7 @@ mqttSink = do
         readTwo x = case traverse readMaybe (words . BC.unpack $ x) of
                       (Just [a,b]) -> Just (a,b)
                       _            -> Nothing
+        call :: Text -> Maybe Topic -> BL.ByteString -> IO ()
 
         call "cmd/sw/schedule" res x = callCMD res $ CMD.scheduleUpdate d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
@@ -215,7 +211,7 @@ mqttSink = do
         call "cmd/hvac/off" res _ = callCMD res CMD.hvacOff
         call "cmd/hvac/wheel" res x = callCMD res $ CMD.wheelHeater (x == "on")
 
-        call "cmd/hvac/seat/driver" res x     = doSeat res CMD.DriverSeat x
+        call "cmd/hvac/seat/driver" res x = doSeat res CMD.DriverSeat x
         call "cmd/hvac/seat/passenger" res x  = doSeat res CMD.PassengerSeat x
         call "cmd/hvac/seat/rearleft" res x   = doSeat res CMD.RearLeftSeat x
         call "cmd/hvac/seat/rearcenter" res x = doSeat res CMD.RearCenterSeat x
@@ -234,6 +230,8 @@ mqttSink = do
         call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
 
         call "cmd/wake" res _ = callCMD res CMD.wakeUp
+
+        call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
         call "cmd/sleep" res _ = do
           unl $ do
@@ -275,13 +273,13 @@ checkAsleep :: MonadIO m => TVar (PrereqAction m) -> PrereqAction m
 checkAsleep _ VOnline = pure $ Left "not asleep"
 checkAsleep p _       = atomically $ writeTVar p checkAwake $> Left "transitioned to checkAwake"
 
-gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan Observation -> m a
-gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
+gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan Observation -> m ()
+gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
     vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
 
     ai <- teslaAuth
-    timeLoop (fetch ai vid) (process vid)
+    timeLoop loopRug (fetch ai vid) (process vid)
 
   where
     naptime :: VehicleData -> Int
@@ -312,8 +310,10 @@ gather (State Options{..} pv) ch = runNamedCar optVName (loadAuthInfo optDBPath)
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = do
   p <- newTVarIO checkAwake
-  runSinks optVerbose (State opts p) gather ([dbSink, watchdogSink (3600 * 12)]
-                                              <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+  rug <- newTVarIO False
+  let st = State opts p rug
+  runSinks optVerbose st gather ([dbSink, watchdogSink (3600 * 12)]
+                                  <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts

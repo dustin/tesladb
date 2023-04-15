@@ -5,7 +5,7 @@ module Tesla.Runner where
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (AsyncCancelled (..))
 import           Control.Concurrent.STM   (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
-                                           readTVar, registerDelay, retry)
+                                           readTVar, registerDelay, TVar, check, writeTVar)
 import           Control.Monad            (forever, unless, void)
 import           Control.Monad.Catch      (Exception, Handler (..), MonadCatch, SomeException (..), catches, throwM)
 import           Control.Monad.IO.Class   (MonadIO (..))
@@ -25,7 +25,7 @@ import           UnliftIO.Timeout         (timeout)
 data SinkEnv o a = SinkEnv {
   _sink_options :: o,
   _sink_chan    :: TChan a
-  }
+}
 
 type Sink o a = ReaderT (SinkEnv o a) (LoggingT IO)
 
@@ -98,19 +98,22 @@ watchdogSink secs = do
   watchdogSink secs
 
     where
-      checkTimeout v = do
-        v' <- readTVar v
-        unless v' retry
-        pure False
+      checkTimeout v = (check =<< readTVar v) $> False
 
-timeLoop :: (MonadUnliftIO f, MonadLogger f) => f t -> (t -> f Int) -> f b
-timeLoop a p = forever $ do
-  d <- timeout (seconds 30) a
-  sleep =<< process d
+timeLoop :: (MonadUnliftIO m, MonadLogger m) => TVar Bool -> m t -> (t -> m Int) -> m ()
+timeLoop rug a p = forever (delay =<< process =<< timeout (seconds 30) a)
 
   where
-    process Nothing  = logErr "Timed out, retrying in 60s" $> 60
-    process (Just d) = p d
+    process = maybe (logErr "Timed out, retrying in 60s" $> 60) p
+
+    delay :: MonadIO m => Int -> m ()
+    delay d = liftIO $ do
+      to <- registerDelay (seconds d)
+      atomically $ do
+        v1 <- readTVar rug
+        v2 <- readTVar to
+        check (v1 || v2)
+        writeTVar rug False
 
 runSinks :: Bool -> o -> (o -> TChan a -> LoggingT IO ()) -> [Sink o a ()] -> IO ()
 runSinks verbose opts gather sinks = withLog $ do
