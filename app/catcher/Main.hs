@@ -239,8 +239,8 @@ storeThings opts@Options{..} unl = do
 run :: Options -> IO ()
 run opts@Options{..} = runDB optDBType
   where
-    runDB DBSQLite   = runSQLite $ withRunInIO (\a -> storeThings opts a)
-    runDB DBPostgres = runPostgres $ withRunInIO (\a -> storeThings opts a)
+    runDB DBSQLite   = runSQLite $ withRunInIO (storeThings opts)
+    runDB DBPostgres = runPostgres $ withRunInIO (storeThings opts)
     runSQLite a = SQLite.withConnection optDBPath $ \db -> runEnv runSQLiteP (SQLiteEnv db) $ a
     runPostgres a = PDB.withDB (BCS.pack optDBPath) $ \db -> runEnv runPG (PGEnv db) $ a
 

@@ -38,7 +38,15 @@ import           UnliftIO.Timeout           (timeout)
 import           Tesla
 import           Tesla.Auth
 import           Tesla.AuthDB
-import           Tesla.Car
+import Tesla.Car
+    ( currentVehicleID,
+      isCharging,
+      isUserPresent,
+      openDoors,
+      runNamedCar,
+      vehicleData,
+      Car,
+      VehicleData )
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.Runner
 import           Tesla.SqliteDB

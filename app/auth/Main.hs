@@ -24,7 +24,7 @@ getToken :: IO String
 getToken = putStr "Paste in a refresh token: " *> hFlush stdout *> getLine
 
 login :: Options -> IO ()
-login Options{..} = updateAuth optDBPath =<< (AuthResponse "" 0 <$> getToken)
+login Options{..} = updateAuth optDBPath . AuthResponse "" 0 =<< getToken
 
 refresh :: Options -> IO ()
 refresh Options{..} = updateAuth optDBPath =<< refreshAuth =<< loadAuth optDBPath
