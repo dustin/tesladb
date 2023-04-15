@@ -3,53 +3,31 @@
 
 module Main where
 
-import           Control.Exception   (bracket_)
 import           Options.Applicative (Parser, execParser, fullDesc, help, helper, info, long, progDesc, short,
                                       showDefault, strOption, switch, value, (<**>))
-import           System.IO           (hFlush, hGetEcho, hSetEcho, stdin, stdout)
+import           System.IO           (hFlush, stdout)
 
 import           Tesla
-import           Tesla.Auth
 import           Tesla.AuthDB
 
 data Options = Options {
   optDBPath    :: String
-  , optAccess  :: String
-  , optSecret  :: String
-  , optEmail   :: String
   , optRefresh :: Bool
   }
 
 options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
-  <*> strOption (long "access_key" <> value "81527cff06843c8634fdc09e8ac0abefb46ac849f38fe1e431c2ef2106796384" <> help "access key")
-  <*> strOption (long "access_secret" <> value "c7257eb71a564034f9419ee651c7d0e5f7aa6bfbd18bafb5c5c033b093bb2fa3" <> help "access secret")
-  <*> strOption (long "email" <> value "" <> help "email address")
-  <*> switch (long "refresh" <> short 'r' <> help "refresh instead of login")
+  <*> switch (long "refresh" <> short 'r' <> help "refresh instead of asking for a token")
 
-withEcho :: Bool -> IO a -> IO a
-withEcho echo action = do
-  putStr "Enter password: " >> hFlush stdout
-  old <- hGetEcho stdin
-  bracket_ (hSetEcho stdin echo) (hSetEcho stdin old >> putStrLn "") action
-
-getPass :: IO String
-getPass = withEcho False getLine
+getToken :: IO String
+getToken = putStr "Paste in a refresh token: " *> hFlush stdout *> getLine
 
 login :: Options -> IO ()
-login Options{..} = do
-  pw <- getPass
-  let ai = AuthInfo{_bearerToken="", _clientID=optAccess, _clientSecret=optSecret, _email=optEmail, _password=pw}
-  ar <- authenticate ai
-  updateAuth optDBPath ar
+login Options{..} = updateAuth optDBPath =<< (AuthResponse "" 0 <$> getToken)
 
 refresh :: Options -> IO ()
-refresh Options{..} = do
-  ar <- loadAuth optDBPath
-  let ai = AuthInfo{_bearerToken="", _clientID=optAccess, _clientSecret=optSecret, _email=optEmail, _password=""}
-  ar' <- refreshAuth ai ar
-  updateAuth optDBPath ar'
+refresh Options{..} = updateAuth optDBPath =<< refreshAuth =<< loadAuth optDBPath
 
 run :: Options -> IO ()
 run opts@Options{..}
