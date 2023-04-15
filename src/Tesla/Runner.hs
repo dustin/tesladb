@@ -15,6 +15,7 @@ import           Control.Monad.Logger     (LogLevel (..), LoggingT, MonadLogger,
 import           Control.Monad.Reader     (ReaderT (..), asks)
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Foldable            (fold)
+import           Data.Functor             (($>))
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
@@ -104,11 +105,11 @@ watchdogSink secs = do
 
 timeLoop :: (MonadUnliftIO f, MonadLogger f) => f t -> (t -> f Int) -> f b
 timeLoop a p = forever $ do
-  d <- timeout (seconds 10) a
+  d <- timeout (seconds 30) a
   sleep =<< process d
 
   where
-    process Nothing  = logErr "Timed out, retrying in 60s" *> pure 60
+    process Nothing  = logErr "Timed out, retrying in 60s" $> 60
     process (Just d) = p d
 
 runSinks :: Bool -> o -> (o -> TChan a -> LoggingT IO ()) -> [Sink o a ()] -> IO ()
