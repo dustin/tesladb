@@ -233,6 +233,8 @@ mqttSink = do
 
         call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
 
+        call "cmd/wake" res _ = callCMD res CMD.wakeUp
+
         call "cmd/sleep" res _ = do
           unl $ do
             p <- asks (prereq . _sink_options)
