@@ -178,11 +178,14 @@ mqttSink = do
 
         callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
           logInfoL ["Command requested: ", cmdname]
-          r <- if optCMDsEnabled then a else pure (Left "command execution is disabled")
+          r <- if optCMDsEnabled then go else pure (Left "command execution is disabled")
           logInfoL ["Finished command: ", cmdname, " with result: ", tshow r]
           respond rt (res r) []
             where cmdname = fromJust . cmd $ t
                   res = either textToBL (const "")
+                  go = catch a (\(e :: SomeException) ->
+                    let msg = "exception occurred in action " <> tshow e in logInfo msg $> Left msg)
+
 
         callDBL res x a = case readTwo x of
                             Just ts -> callCMD res $ a ts
