@@ -229,7 +229,7 @@ mqttSink = do
 
         call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
 
-        call "cmd/wake" res _ = callCMD res CMD.wakeUp
+        call "cmd/wake" res _ = callCMD res (maybe (Left "failed to issue wake up command") (const (Right ())) <$> CMD.wakeUp)
 
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
