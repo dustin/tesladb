@@ -192,10 +192,6 @@ mqttSink = do
                             Just ts -> callCMD res $ a ts
                             Nothing -> respond res "Could not parse arguments (expected two double values)" []
 
-
-        doSeat res seat level = callCMD res $ CMD.heatSeat seat d
-          where d = fromMaybe 0 (readMaybe . BC.unpack $ level)
-
         readTwo x = case traverse readMaybe (words . BC.unpack $ x) of
                       (Just [a,b]) -> Just (a,b)
                       _            -> Nothing
@@ -209,17 +205,11 @@ mqttSink = do
         call "cmd/charging/start" res _ = callCMD res CMD.startCharging
         call "cmd/charging/stop" res _ = callCMD res CMD.stopCharging
         call "cmd/charging/limit" res x = callCMD res $ CMD.setLimit d
-          where d = fromMaybe 80 (readMaybe . BC.unpack $ x)
+          where d = fromMaybe (fromJust $ read "80") (readMaybe . BC.unpack $ x)
 
         call "cmd/hvac/on" res _ = callCMD res CMD.hvacOn
         call "cmd/hvac/off" res _ = callCMD res CMD.hvacOff
         call "cmd/hvac/wheel" res x = callCMD res $ CMD.wheelHeater (x == "on")
-
-        call "cmd/hvac/seat/driver" res x = doSeat res CMD.DriverSeat x
-        call "cmd/hvac/seat/passenger" res x  = doSeat res CMD.PassengerSeat x
-        call "cmd/hvac/seat/rearleft" res x   = doSeat res CMD.RearLeftSeat x
-        call "cmd/hvac/seat/rearcenter" res x = doSeat res CMD.RearCenterSeat x
-        call "cmd/hvac/seat/rearright" res x  = doSeat res CMD.RearRightSeat x
 
         call "cmd/alerts/honk" res _ = callCMD res CMD.honkHorn
         call "cmd/alerts/flash" res _ = callCMD res CMD.flashLights
@@ -231,7 +221,7 @@ mqttSink = do
         call "cmd/windows/vent" res _ = callCMD res CMD.ventWindows
         call "cmd/windows/close" res x = callDBL res x CMD.closeWindows
 
-        call "cmd/homelink/trigger" res x = callDBL res x CMD.trigger
+        call "cmd/homelink/trigger" res x = callDBL res x CMD.homelink
 
         call "cmd/wake" res _ = callCMD res (CMD.wakeUp @Value $> Right ())
 
