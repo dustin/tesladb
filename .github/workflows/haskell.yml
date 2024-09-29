@@ -15,7 +15,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
+
+    - name: Set up Stack
+      uses: haskell/actions/setup@v2
+      with:
+        stack-version: 'latest'
 
     - name: Cache Key
       id: cache_key
@@ -23,7 +28,7 @@ jobs:
 
     - name: Cache Dependencies
       id: cache
-      uses: actions/cache@v1
+      uses: actions/cache@v3
       with:
         path: ~/.stack
         key: ${{ matrix.os }}-${{ steps.cache_key.outputs.key }}
@@ -31,17 +36,17 @@ jobs:
     - name: Build Snapshot
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        stack --no-terminal test --bench --only-snapshot
+        stack --resolver ghc-9.6.4 --no-terminal test --bench --only-snapshot
 
     - name: Build & Test
       run: |
-        stack --no-terminal test --bench --no-run-benchmarks
+        stack --resolver ghc-9.6.4 --no-terminal test --bench --no-run-benchmarks
         stack install
         mkdir dist
         cp $HOME/.local/bin/{teslauth,tesladb,teslacatcher} dist
 
     - name: Store Artifact
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v3
       with:
         name: tesladb-${{ matrix.os }}
         path: dist
