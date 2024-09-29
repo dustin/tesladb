@@ -296,11 +296,10 @@ gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo op
     mergedData = do
       v <- vehicleData
       -- If location data returns valid drive state, patch it into the larger one.
-      try locationData >>= \case
-        Left (_ :: SomeException) -> pure v
-        Right l -> case l ^? vdata . key "drive_state" of
-          Nothing -> pure v
-          Just d  -> pure (v & vdata . key "drive_state" .~ d)
+      loc <- try @_ @SomeException locationData
+      case loc ^? _Right . vdata . key "drive_state" of
+        Nothing -> pure v
+        Just d  -> pure (v & vdata . key "drive_state" .~ d)
 
     process _ (Left s) = logInfoL ["No data: ", s] $> 300
     process vid (Right v) = do
