@@ -10,13 +10,14 @@ module Main where
 
 import           Control.Lens
 import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM)
+import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM, try)
 import           Control.Monad.IO.Class     (MonadIO (..))
 import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
 import           Control.Monad.Logger       (MonadLogger (..))
 import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (Value, decode, encode)
 import           Data.Aeson.Lens
+import           Data.Bifunctor             (first)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Foldable              (asum)
@@ -39,8 +40,8 @@ import           UnliftIO.Timeout           (timeout)
 import           Tesla
 import           Tesla.Auth
 import           Tesla.AuthDB
-import           Tesla.Car                  (Car, VehicleData, currentVehicleID, isCharging, isUserPresent, openDoors,
-                                             runNamedCar, vehicleData)
+import           Tesla.Car                  (Car, VehicleData, currentVehicleID, isCharging, isUserPresent,
+                                             locationData, openDoors, runNamedCar, vdata, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.Runner
 import           Tesla.SqliteDB
@@ -287,9 +288,19 @@ gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo op
               liftIO . atomically $ writeTChan ch (PData prods)
               let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
               pa <- (liftIO . readTVarIO) pv
-              either (pure . Left) (const vd) =<< pa state
+              either (pure . Left) (const (tryt mergedData)) =<< pa state
 
-    vd = catch (Right <$> vehicleData) (\(e :: SomeException) -> pure (Left (tshow e)))
+    tryt :: MonadCatch m => m a -> m (Either Text a)
+    tryt f = try @_ @SomeException f <&> first (T.pack . show)
+
+    mergedData = do
+      v <- vehicleData
+      -- If location data returns valid drive state, patch it into the larger one.
+      try locationData >>= \case
+        Left (_ :: SomeException) -> pure v
+        Right l -> case l ^? vdata . key "drive_state" of
+          Nothing -> pure v
+          Just d  -> pure (v & vdata . key "drive_state" .~ d)
 
     process _ (Left s) = logInfoL ["No data: ", s] $> 300
     process vid (Right v) = do
