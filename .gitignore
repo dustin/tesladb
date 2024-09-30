@@ -1,7 +1,10 @@
-*~
-.stack-work/
-/tesla.db
-stack.yaml.lock
-.DS_Store
 .direnv/
+.DS_Store
+.stack-work/
+*~
+/tesla.db
 dist-newstyle/
+stack.yaml.lock
+TAGS
+tesladb.eventlog
+test.db
