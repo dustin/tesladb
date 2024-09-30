@@ -17,33 +17,33 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Stack
+    - name: Set up Haskell
       uses: haskell/actions/setup@v2
       with:
-        stack-version: 'latest'
+        ghc-version: '9.6.4'
+        cabal-version: 'latest'
 
-    - name: Cache Key
-      id: cache_key
-      run: echo ::set-output name=key::$(md5sum stack.yaml | awk '{print $1}')
+    - name: Update Cabal Package List
+      run: cabal update
 
     - name: Cache Dependencies
       id: cache
       uses: actions/cache@v3
       with:
-        path: ~/.stack
-        key: ${{ matrix.os }}-${{ steps.cache_key.outputs.key }}
+        path: |
+          ~/.cabal/store
+          dist-newstyle
+        key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
 
-    - name: Build Snapshot
+    - name: Build Dependencies
       if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        stack --resolver ghc-9.6.4 --no-terminal test --bench --only-snapshot
+      run: cabal build --only-dependencies
 
     - name: Build & Test
       run: |
-        stack --resolver ghc-9.6.4 --no-terminal test --bench --no-run-benchmarks
-        stack install
-        mkdir dist
-        cp $HOME/.local/bin/{teslauth,tesladb,teslacatcher} dist
+        cabal build all
+        cabal test all
+        cabal install exe:teslauth exe:tesladb exe:teslacatcher --installdir=./dist --overwrite-policy=always
 
     - name: Store Artifact
       uses: actions/upload-artifact@v3
