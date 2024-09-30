@@ -4,6 +4,7 @@ mkShell {
   buildInputs = [
     stack
     cabal-install
+    hpack
     haskell.compiler.ghc96
     sqlite-interactive
     ffmpeg
