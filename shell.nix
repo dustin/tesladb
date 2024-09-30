@@ -16,6 +16,8 @@ mkShell {
     haskellPackages.tasty-discover
     zlib
     postgresql_15
+    gmpxx
+    libffi
   ];
 
   shellHook = ''
