@@ -1,0 +1,215 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.35.2.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: d8abfb03683d67743fffe3f26617057c5ca3b8b0e1c941c553ac16650bd77f7d
+
+name:           tesladb
+version:        0.3.0.0
+description:    Please see the README on GitHub at <https://github.com/dustin/tesladb#readme>
+homepage:       https://github.com/dustin/tesladb#readme
+bug-reports:    https://github.com/dustin/tesladb/issues
+author:         Dustin Sallings
+maintainer:     dustin@spy.net
+copyright:      MIT
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/dustin/tesladb
+
+library
+  exposed-modules:
+      Tesla.AuthDB
+      Tesla.PostgresDB
+      Tesla.Runner
+      Tesla.SqliteDB
+  other-modules:
+      Paths_tesladb
+  hs-source-dirs:
+      src
+  ghc-options: -Wall
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , generic-deriving
+    , http-client
+    , lens
+    , lens-aeson
+    , monad-logger
+    , mtl
+    , net-mqtt >=0.8
+    , network-uri
+    , optparse-applicative
+    , postgresql-simple
+    , sqlite-simple
+    , stm
+    , tesla >=0.7.5.0
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , vector
+    , wreq
+  default-language: Haskell2010
+
+executable teslacatcher
+  main-is: Main.hs
+  other-modules:
+      Paths_tesladb
+  hs-source-dirs:
+      app/catcher
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , generic-deriving
+    , http-client
+    , lens
+    , lens-aeson
+    , monad-logger
+    , mtl
+    , net-mqtt >=0.8
+    , net-mqtt-rpc >=0.2
+    , network-uri
+    , optparse-applicative
+    , postgresql-simple
+    , sqlite-simple
+    , stm
+    , tesla >=0.7.5.0
+    , tesladb
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , vector
+    , wreq
+  default-language: Haskell2010
+
+executable tesladb
+  main-is: Main.hs
+  other-modules:
+      Paths_tesladb
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -eventlog -with-rtsopts=-N -Wall -O2
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , generic-deriving
+    , http-client
+    , lens
+    , lens-aeson
+    , monad-logger
+    , mtl
+    , net-mqtt >=0.8
+    , network-uri
+    , optparse-applicative
+    , postgresql-simple
+    , sqlite-simple
+    , stm
+    , tesla >=0.7.5.0
+    , tesladb
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , vector
+    , wreq
+  default-language: Haskell2010
+
+executable tesladbfix
+  main-is: Main.hs
+  other-modules:
+      Paths_tesladb
+  hs-source-dirs:
+      app/tsfix
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , generic-deriving
+    , http-client
+    , lens
+    , lens-aeson
+    , monad-logger
+    , mtl
+    , net-mqtt >=0.8
+    , network-uri
+    , optparse-applicative
+    , postgresql-simple
+    , sqlite-simple
+    , stm
+    , tesla >=0.7.5.0
+    , tesladb
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , vector
+    , wreq
+  default-language: Haskell2010
+
+executable teslauth
+  main-is: Main.hs
+  other-modules:
+      Paths_tesladb
+  hs-source-dirs:
+      app/auth
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , exceptions
+    , generic-deriving
+    , http-client
+    , lens
+    , lens-aeson
+    , monad-logger
+    , mtl
+    , net-mqtt >=0.8
+    , network-uri
+    , optparse-applicative
+    , postgresql-simple
+    , sqlite-simple
+    , stm
+    , tesla >=0.7.5.0
+    , tesladb
+    , text
+    , time
+    , transformers
+    , unliftio
+    , unliftio-core
+    , vector
+    , wreq
+  default-language: Haskell2010

@@ -1,7 +1,6 @@
 *~
 .stack-work/
 /tesla.db
-tesladb.cabal
 stack.yaml.lock
 .DS_Store
 .direnv/
