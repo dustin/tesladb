@@ -1,11 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Tesla.Runner where
 
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (AsyncCancelled (..))
-import           Control.Concurrent.STM   (TChan, atomically, dupTChan, newBroadcastTChanIO, orElse, readTChan,
-                                           readTVar, registerDelay, TVar, check, writeTVar)
+import           Control.Concurrent.STM   (TChan, TVar, atomically, check, dupTChan, newBroadcastTChanIO, orElse,
+                                           readTChan, readTVar, registerDelay, writeTVar)
 import           Control.Monad            (forever, unless, void)
 import           Control.Monad.Catch      (Exception, Handler (..), MonadCatch, SomeException (..), catches, throwM)
 import           Control.Monad.IO.Class   (MonadIO (..))
@@ -125,5 +123,5 @@ runSinks verbose opts gather sinks = withLog $ do
     d ch = liftIO . atomically $ dupTChan ch
     runSink f ch = runReaderT f (SinkEnv opts ch)
     logfilt = filterLogger (\_ -> flip (if verbose then (>=) else (>)) LevelDebug)
-    withLog :: MonadIO m => LoggingT m a -> m a
+    -- withLog :: MonadIO m => LoggingT m a -> m a
     withLog = runStderrLoggingT . logfilt

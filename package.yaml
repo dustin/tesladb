@@ -47,6 +47,26 @@ dependencies:
 - monad-logger
 - tesla >= 0.7.5.0
 
+default-extensions:
+  - OverloadedStrings
+  - RecordWildCards
+  - NamedFieldPuns
+  - UndecidableInstances
+  - GADTs
+  - KindSignatures
+  - LambdaCase
+  - BlockArguments
+  - TypeOperators
+  - RankNTypes
+  - FlexibleContexts
+  - DataKinds
+  - ConstraintKinds
+  - ScopedTypeVariables
+  - TypeApplications
+  - GeneralizedNewtypeDeriving
+  - DeriveGeneric
+  - DeriveFunctor
+
 library:
   source-dirs: src
   ghc-options:

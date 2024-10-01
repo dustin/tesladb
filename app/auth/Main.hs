@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards   #-}
-
 module Main where
 
 import           Options.Applicative (Parser, execParser, fullDesc, help, helper, info, long, progDesc, short,

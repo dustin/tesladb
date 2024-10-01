@@ -1,8 +1,3 @@
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RecordWildCards            #-}
-
 module Main where
 
 import           Control.Monad                        (unless, (<=<))
@@ -173,7 +168,9 @@ tryInsert vd = E.catches (insertVData vd) [
   E.Handler (\ex -> report (ex :: SQLite.SQLError)),
   E.Handler (\ex -> report (ex :: PG.SqlError))
   ]
-  where report es = logErr $ fold ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr es]
+  where
+    report :: (MonadLogger m, Show e) => e -> m ()
+    report es = logErr $ fold ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr es]
 
 backfill :: (Persistence m, MonadLogger m, E.MonadCatch m, MonadFail m, MonadUnliftIO m)
          => MQTTClient -> Filter -> m ()

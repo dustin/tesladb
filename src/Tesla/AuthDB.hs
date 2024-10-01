@@ -1,5 +1,4 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Tesla.AuthDB (updateAuth, loadAuth, loadAuthInfo) where
 

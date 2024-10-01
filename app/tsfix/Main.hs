@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main where
 
 import qualified Data.ByteString.Lazy             as BL
@@ -19,7 +17,7 @@ instance FromField VD where
   fromField f = case fieldData f of
                   (SQLBlob b) -> Ok . VD . BL.fromStrict $ b
                   (SQLText t) -> Ok . VD . BL.fromStrict . TE.encodeUtf8 $ t
-                  _ -> returnError ConversionFailed f "need some text or blobs or whatever"
+                  _           -> returnError ConversionFailed f "need some text or blobs or whatever"
 
 update :: String -> String -> IO ()
 update old new = withConnection old srcData

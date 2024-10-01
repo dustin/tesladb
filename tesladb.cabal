@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d8abfb03683d67743fffe3f26617057c5ca3b8b0e1c941c553ac16650bd77f7d
+-- hash: dd31d116f0ed33141821519aeeff7ec0498ffddd42b379c8c076f90a33a4aee3
 
 name:           tesladb
 version:        0.3.0.0
@@ -35,6 +35,25 @@ library
       Paths_tesladb
   hs-source-dirs:
       src
+  default-extensions:
+      OverloadedStrings
+      RecordWildCards
+      NamedFieldPuns
+      UndecidableInstances
+      GADTs
+      KindSignatures
+      LambdaCase
+      BlockArguments
+      TypeOperators
+      RankNTypes
+      FlexibleContexts
+      DataKinds
+      ConstraintKinds
+      ScopedTypeVariables
+      TypeApplications
+      GeneralizedNewtypeDeriving
+      DeriveGeneric
+      DeriveFunctor
   ghc-options: -Wall
   build-depends:
       aeson
@@ -71,6 +90,25 @@ executable teslacatcher
       Paths_tesladb
   hs-source-dirs:
       app/catcher
+  default-extensions:
+      OverloadedStrings
+      RecordWildCards
+      NamedFieldPuns
+      UndecidableInstances
+      GADTs
+      KindSignatures
+      LambdaCase
+      BlockArguments
+      TypeOperators
+      RankNTypes
+      FlexibleContexts
+      DataKinds
+      ConstraintKinds
+      ScopedTypeVariables
+      TypeApplications
+      GeneralizedNewtypeDeriving
+      DeriveGeneric
+      DeriveFunctor
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
@@ -109,6 +147,25 @@ executable tesladb
       Paths_tesladb
   hs-source-dirs:
       app
+  default-extensions:
+      OverloadedStrings
+      RecordWildCards
+      NamedFieldPuns
+      UndecidableInstances
+      GADTs
+      KindSignatures
+      LambdaCase
+      BlockArguments
+      TypeOperators
+      RankNTypes
+      FlexibleContexts
+      DataKinds
+      ConstraintKinds
+      ScopedTypeVariables
+      TypeApplications
+      GeneralizedNewtypeDeriving
+      DeriveGeneric
+      DeriveFunctor
   ghc-options: -threaded -rtsopts -eventlog -with-rtsopts=-N -Wall -O2
   build-depends:
       aeson
@@ -146,6 +203,25 @@ executable tesladbfix
       Paths_tesladb
   hs-source-dirs:
       app/tsfix
+  default-extensions:
+      OverloadedStrings
+      RecordWildCards
+      NamedFieldPuns
+      UndecidableInstances
+      GADTs
+      KindSignatures
+      LambdaCase
+      BlockArguments
+      TypeOperators
+      RankNTypes
+      FlexibleContexts
+      DataKinds
+      ConstraintKinds
+      ScopedTypeVariables
+      TypeApplications
+      GeneralizedNewtypeDeriving
+      DeriveGeneric
+      DeriveFunctor
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
@@ -183,6 +259,25 @@ executable teslauth
       Paths_tesladb
   hs-source-dirs:
       app/auth
+  default-extensions:
+      OverloadedStrings
+      RecordWildCards
+      NamedFieldPuns
+      UndecidableInstances
+      GADTs
+      KindSignatures
+      LambdaCase
+      BlockArguments
+      TypeOperators
+      RankNTypes
+      FlexibleContexts
+      DataKinds
+      ConstraintKinds
+      ScopedTypeVariables
+      TypeApplications
+      GeneralizedNewtypeDeriving
+      DeriveGeneric
+      DeriveFunctor
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson

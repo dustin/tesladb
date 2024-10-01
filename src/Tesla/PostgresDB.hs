@@ -1,6 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE QuasiQuotes       #-}
-{-# LANGUAGE RankNTypes        #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 module Tesla.PostgresDB (insertVData, dbInit, listDays, listDay, fetchDatum, withDB) where
 

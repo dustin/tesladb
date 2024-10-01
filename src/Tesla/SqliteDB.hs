@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Tesla.SqliteDB (insertVData, dbInit, listDays, listDay, fetchDatum) where
 
 import           Control.Monad          (guard)
