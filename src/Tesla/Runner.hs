@@ -1,31 +1,27 @@
 module Tesla.Runner where
 
+import           Cleff
+import           Cleff.Reader
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (AsyncCancelled (..))
 import           Control.Concurrent.STM   (TChan, TVar, atomically, check, dupTChan, newBroadcastTChanIO, orElse,
                                            readTChan, readTVar, registerDelay, writeTVar)
-import           Control.Monad            (forever, unless, void)
-import           Control.Monad.Catch      (Exception, Handler (..), MonadCatch, SomeException (..), catches, throwM)
-import           Control.Monad.IO.Class   (MonadIO (..))
-import           Control.Monad.IO.Unlift  (MonadUnliftIO)
-import           Control.Monad.Logger     (LogLevel (..), LoggingT, MonadLogger, filterLogger, logDebugN, logErrorN,
-                                           logInfoN, runStderrLoggingT)
-import           Control.Monad.Reader     (ReaderT (..), asks)
+import           Control.Monad            (forever, unless, void, (>=>))
+import           Control.Monad.Catch      (Exception, Handler (..), SomeException (..), catches, throwM)
 import qualified Data.ByteString.Lazy     as BL
-import           Data.Foldable            (fold)
 import           Data.Functor             (($>))
 import           Data.Text                (Text)
-import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
+import           Tesla.Types
 import           UnliftIO.Async           (async, race_, waitAnyCancel)
 import           UnliftIO.Timeout         (timeout)
 
-data SinkEnv o a = SinkEnv {
-  _sink_options :: o,
-  _sink_chan    :: TChan a
-}
+import           Tesla.Logging
 
-type Sink o a = ReaderT (SinkEnv o a) (LoggingT IO)
+data SinkEnv = SinkEnv {
+  _sink_options :: State,
+  _sink_chan    :: TChan Observation
+}
 
 newtype DeathException = Die String deriving(Eq, Show)
 
@@ -44,37 +40,16 @@ textToBL = BL.fromStrict . TE.encodeUtf8
 die :: String -> IO ()
 die = throwM . Die
 
-logErr :: MonadLogger m => Text -> m ()
-logErr = logErrorN
-
-logErrL :: (MonadLogger m, Foldable f) => f Text -> m ()
-logErrL = logErrorN . fold
-
-logInfo :: MonadLogger m => Text -> m ()
-logInfo = logInfoN
-
-logInfoL :: (MonadLogger m, Foldable f) => f Text -> m ()
-logInfoL = logInfoN . fold
-
-logDbg :: MonadLogger m => Text -> m ()
-logDbg = logDebugN
-
-logDbgL :: (MonadLogger m, Foldable f) => f Text -> m ()
-logDbgL = logDebugN . fold
-
-tshow :: Show a => a -> Text
-tshow = T.pack . show
-
-excLoop :: Text -> (Sink o a) () -> (Sink o a) ()
+excLoop :: forall es. [IOE, LogFX, Reader SinkEnv] :>> es => Text -> Eff es () -> Eff es ()
 excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
   where
-    cancelHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => AsyncCancelled -> m ()
-    cancelHandler e = logErr "AsyncCanceled from mqtt handler" >> throwM e
+    cancelHandler :: AsyncCancelled -> Eff es ()
+    cancelHandler e = logError "AsyncCanceled from mqtt handler" >> throwM e
 
-    otherHandler :: (MonadCatch m, MonadLogger m, MonadIO m) => SomeException -> m ()
+    otherHandler :: SomeException -> Eff es ()
     otherHandler e = do
-      logErrL ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
+      logErrorL ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
       sleep 5
 
 sleep :: MonadIO m => Int -> m ()
@@ -84,9 +59,9 @@ seconds :: Int -> Int
 seconds = (* 1000000)
 
 raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
-raceABunch_ is = traverse async is >>= void.waitAnyCancel
+raceABunch_ = traverse async >=> void.waitAnyCancel
 
-watchdogSink :: Int -> (Sink o a) ()
+watchdogSink :: [IOE, LogFX, Reader SinkEnv] :>> es => Int -> Eff es ()
 watchdogSink secs = do
   ch <- asks _sink_chan
   tov <- liftIO $ registerDelay (seconds secs)
@@ -98,30 +73,28 @@ watchdogSink secs = do
     where
       checkTimeout v = (check =<< readTVar v) $> False
 
-timeLoop :: (MonadUnliftIO m, MonadLogger m) => TVar Bool -> m t -> (t -> m Int) -> m ()
+-- timeLoop :: ([IOE, LogFX] :>> es, MonadUnliftIO m) => TVar Bool -> m t -> (t -> m Int) -> Eff es ()
+timeLoop :: MonadUnliftIO m => TVar Bool -> m a -> (a -> m Int) -> m b
 timeLoop rug a p = forever (delay =<< process =<< timeout (seconds 30) a)
 
   where
-    process = maybe (logErr "Timed out, retrying in 60s" $> 60) p
+    -- process = maybe (logError "Timed out, retrying in 60s" $> 60) p
+    process = maybe (pure 60) p
 
-    delay :: MonadIO m => Int -> m ()
-    delay d = liftIO $ do
+    -- delay :: IOE es :> Eff es () => Int -> Eff es ()
+    delay d = liftIO do
       to <- registerDelay (seconds d)
-      atomically $ do
+      atomically do
         v1 <- readTVar rug
         v2 <- readTVar to
         check (v1 || v2)
         writeTVar rug False
 
-runSinks :: Bool -> o -> (o -> TChan a -> LoggingT IO ()) -> [Sink o a ()] -> IO ()
-runSinks verbose opts gather sinks = withLog $ do
+runSinks :: [IOE, LogFX] :>> es => State -> (State -> TChan Observation -> Eff es ()) -> [Eff (Reader SinkEnv:es) ()] -> Eff es ()
+runSinks st gather sinks = do
   tch <- liftIO newBroadcastTChanIO
-  race_ (gather opts tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+  race_ (gather st tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
 
   where
-
-    d ch = liftIO . atomically $ dupTChan ch
-    runSink f ch = runReaderT f (SinkEnv opts ch)
-    logfilt = filterLogger (\_ -> flip (if verbose then (>=) else (>)) LevelDebug)
-    -- withLog :: MonadIO m => LoggingT m a -> m a
-    withLog = runStderrLoggingT . logfilt
+    d = liftIO . atomically . dupTChan
+    runSink f ch = runReader (SinkEnv st ch) f

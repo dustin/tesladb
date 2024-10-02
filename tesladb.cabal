@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: dd31d116f0ed33141821519aeeff7ec0498ffddd42b379c8c076f90a33a4aee3
+-- hash: 3dab984084c41429d5d84f20b25354b65a6138338bcf3ab1005fe3f60d46b8bb
 
 name:           tesladb
 version:        0.3.0.0
@@ -28,9 +28,11 @@ source-repository head
 library
   exposed-modules:
       Tesla.AuthDB
+      Tesla.Logging
       Tesla.PostgresDB
       Tesla.Runner
       Tesla.SqliteDB
+      Tesla.Types
   other-modules:
       Paths_tesladb
   hs-source-dirs:
@@ -54,12 +56,14 @@ library
       GeneralizedNewtypeDeriving
       DeriveGeneric
       DeriveFunctor
+      AllowAmbiguousTypes
   ghc-options: -Wall
   build-depends:
       aeson
     , async
     , base >=4.7 && <5
     , bytestring
+    , cleff
     , containers
     , exceptions
     , generic-deriving
@@ -109,12 +113,14 @@ executable teslacatcher
       GeneralizedNewtypeDeriving
       DeriveGeneric
       DeriveFunctor
+      AllowAmbiguousTypes
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
     , async
     , base >=4.7 && <5
     , bytestring
+    , cleff
     , containers
     , exceptions
     , generic-deriving
@@ -166,12 +172,14 @@ executable tesladb
       GeneralizedNewtypeDeriving
       DeriveGeneric
       DeriveFunctor
+      AllowAmbiguousTypes
   ghc-options: -threaded -rtsopts -eventlog -with-rtsopts=-N -Wall -O2
   build-depends:
       aeson
     , async
     , base >=4.7 && <5
     , bytestring
+    , cleff
     , containers
     , exceptions
     , generic-deriving
@@ -222,12 +230,14 @@ executable tesladbfix
       GeneralizedNewtypeDeriving
       DeriveGeneric
       DeriveFunctor
+      AllowAmbiguousTypes
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
     , async
     , base >=4.7 && <5
     , bytestring
+    , cleff
     , containers
     , exceptions
     , generic-deriving
@@ -278,12 +288,14 @@ executable teslauth
       GeneralizedNewtypeDeriving
       DeriveGeneric
       DeriveFunctor
+      AllowAmbiguousTypes
   ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
     , async
     , base >=4.7 && <5
     , bytestring
+    , cleff
     , containers
     , exceptions
     , generic-deriving

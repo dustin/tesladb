@@ -1,12 +1,11 @@
 module Main where
 
+import           Cleff
+import           Cleff.Reader
+import           Control.Applicative        (liftA2)
 import           Control.Lens
 import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM, try)
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.IO.Unlift    (MonadUnliftIO, withRunInIO)
-import           Control.Monad.Logger       (MonadLogger (..))
-import           Control.Monad.Reader       (asks)
 import           Data.Aeson                 (Value, decode, encode)
 import           Data.Aeson.Lens
 import           Data.Bifunctor             (first)
@@ -32,35 +31,14 @@ import           UnliftIO.Timeout           (timeout)
 import           Tesla
 import           Tesla.Auth
 import           Tesla.AuthDB
-import           Tesla.Car                  (Car, VehicleData, currentVehicleID, isCharging, isUserPresent,
-                                             locationData, openDoors, runNamedCar, vdata, vehicleData)
+import           Tesla.Car                  (VehicleData, currentVehicleID, isCharging, isUserPresent, locationData,
+                                             openDoors, runCar, runNamedCar, vdata, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.Runner
 import           Tesla.SqliteDB
 
-data Options = Options {
-  optDBPath        :: FilePath
-  , optVName       :: Text
-  , optNoMQTT      :: Bool
-  , optVerbose     :: Bool
-  , optMQTTURI     :: URI
-  , optMQTTTopic   :: Topic
-  , optInTopic     :: Filter
-  , optCMDsEnabled :: Bool
-  , optMQTTProds   :: Topic
-  }
-
-type PrereqAction m = VehicleState -> Car m (Either Text ())
-
-data State m = State {
-  opts      :: Options
-  , prereq  :: TVar (PrereqAction m)
-  , loopRug :: TVar Bool
-  }
-
-data Observation = VData VehicleData | PData Value
-
-type VSink m = Sink (State m) Observation
+import           Tesla.Logging
+import           Tesla.Types
 
 options :: Parser Options
 options = Options
@@ -74,7 +52,7 @@ options = Options
   <*> switch (long "enable-commands" <> help "enable remote commands")
   <*> strOption (long "product-topic" <> showDefault <> value "tmp/tesla/products" <> help "Raw product topic")
 
-dbSink :: MonadIO m => (VSink m) ()
+dbSink :: [IOE, Reader SinkEnv] :>> es => Eff es ()
 dbSink = do
   Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
@@ -88,8 +66,13 @@ dbSink = do
         VData v -> insertVData db v
         _       -> pure ()
 
-mqttSink :: (MonadLogger m, MonadIO m) => (VSink m) ()
+mqttSink :: [IOE, LogFX, Reader SinkEnv] :>> es => Eff es ()
 mqttSink = do
+  Options{optDBPath, optVName} <- asks (opts . _sink_options)
+  runNamedCar optVName (loadAuthInfo optDBPath) currentVehicleID >>= mqttSink'
+
+mqttSink' :: [IOE, LogFX, Reader SinkEnv] :>> es => VehicleID -> Eff es ()
+mqttSink' vid = do
   opts@Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
   rug <- asks (loopRug . _sink_options)
@@ -109,7 +92,7 @@ mqttSink = do
       pure mc
 
     disco Options{optMQTTURI} unl c = unl $ do
-      logErrL ["disconnecting from ", tshow optMQTTURI]
+      logErrorL ["disconnecting from ", tshow optMQTTURI]
       catch (liftIO $ normalDisconnect c) (\(e :: SomeException) ->
                                               logInfoL ["error disconnecting ", tshow e])
       logInfoL ["disconnected from ", tshow optMQTTURI]
@@ -170,14 +153,14 @@ mqttSink = do
         respond Nothing _  _    = pure ()
         respond (Just rt) rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
-        callCMD rt a = unl $ runNamedCar optVName (loadAuthInfo optDBPath) $ do
+        callCMD rt a = unl do
           logInfoL ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then go else pure (Left "command execution is disabled")
           logInfoL ["Finished command: ", cmdname, " with result: ", tshow r]
           respond rt (res r) []
             where cmdname = fromJust . cmd $ t
                   res = either textToBL (const "")
-                  go = catch a (\(e :: SomeException) ->
+                  go = catch (runCar (loadAuthInfo optDBPath) vid a) (\(e :: SomeException) ->
                     let msg = "exception occurred in action " <> tshow e in logInfo msg $> Left msg)
 
 
@@ -220,12 +203,14 @@ mqttSink = do
 
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
+{-
         call "cmd/sleep" res _ = do
           unl $ do
             p <- asks (prereq . _sink_options)
-            atomically $ writeTVar p (checkAsleep p)
-            logInfo "Switching to checkAsleep"
+            atomically $ writeTVar p CheckAsleep
+            lift $ logInfo "Switching to checkAsleep"
           respond res "OK" []
+-}
 
         -- All RPCs below require a response topic.
 
@@ -252,20 +237,20 @@ mqttSink = do
           unl $ logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-checkAwake :: MonadIO m => PrereqAction m
-checkAwake VOnline = pure $ Right ()
-checkAwake st      = pure $ Left ("not awake, current status: " <> tshow st)
+checkAwake' :: IOE :> es => VehicleState -> Eff es (Either Text ())
+checkAwake' VOnline = pure $ Right ()
+checkAwake' st      = pure $ Left ("not awake, current status: " <> tshow st)
 
-checkAsleep :: MonadIO m => TVar (PrereqAction m) -> PrereqAction m
-checkAsleep _ VOnline = pure $ Left "not asleep"
-checkAsleep p _       = atomically $ writeTVar p checkAwake $> Left "transitioned to checkAwake"
+checkAsleep' :: IOE :> es => TVar PrereqAction -> VehicleState -> Eff es (Either Text ())
+checkAsleep' _ VOnline = pure $ Left "not asleep"
+checkAsleep' p _       = atomically $ writeTVar p CheckAwake $> Left "transitioned to checkAwake"
 
-gather :: (MonadCatch m, MonadLogger m, MonadUnliftIO m) => State m -> TChan Observation -> m ()
-gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo optDBPath) $ do
-    vid <- currentVehicleID
+gather :: [IOE, LogFX] :>> es => State -> TChan Observation -> Eff es ()
+gather (State Options{..} pv loopRug) ch = do
+    (vid, ai) <- runNamedCar optVName (loadAuthInfo optDBPath) $ liftA2 (,) currentVehicleID teslaAuth
+    -- vid <- currentVehicleID
     logInfoL ["Looping with vid: ", vid]
-
-    ai <- teslaAuth
+    -- runCar :: MonadIO m => IO AuthInfo -> VehicleID -> Car m a -> m a
     timeLoop loopRug (fetch ai vid) (process vid)
 
   where
@@ -280,12 +265,15 @@ gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo op
               liftIO . atomically $ writeTChan ch (PData prods)
               let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
               pa <- (liftIO . readTVarIO) pv
-              either (pure . Left) (const (tryt mergedData)) =<< pa state
+              st <- case pa of
+                CheckAwake  -> checkAwake' state
+                CheckAsleep -> checkAsleep' pv state
+              either (pure . Left) (const (tryt (mergedData vid))) st
 
     tryt :: MonadCatch m => m a -> m (Either Text a)
     tryt f = try @_ @SomeException f <&> first (T.pack . show)
 
-    mergedData = do
+    mergedData vid = runCar (loadAuthInfo optDBPath) vid do
       v <- vehicleData
       -- If location data returns valid drive state, patch it into the larger one.
       loc <- try @_ @SomeException locationData
@@ -293,23 +281,25 @@ gather (State Options{..} pv loopRug) ch = runNamedCar optVName (loadAuthInfo op
         Nothing -> pure v
         Just d  -> pure (v & vdata . key "drive_state" .~ d)
 
+    -- process :: [IOE, LogFX] :>> es1 => Text -> Either Text VehicleData -> Car (Eff es1) Int
     process _ (Left s) = logInfoL ["No data: ", s] $> 300
     process vid (Right v) = do
       logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch (VData v)
       let nt = naptime v
       logInfoL ["Sleeping for ", tshow nt,
-                " user present: ", tshow $ isUserPresent v,
-                ", charging: ", tshow $ isCharging v]
+                      " user present: ", tshow $ isUserPresent v,
+                      ", charging: ", tshow $ isCharging v]
       pure nt
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose} = do
-  p <- newTVarIO checkAwake
+  p <- newTVarIO CheckAwake
   rug <- newTVarIO False
   let st = State opts p rug
-  runSinks optVerbose st gather ([dbSink, watchdogSink (3600 * 12)]
-                                  <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+  runIOE . runLogFX optVerbose $
+    runSinks st gather ([dbSink, watchdogSink (3600 * 12)]
+                                    <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts

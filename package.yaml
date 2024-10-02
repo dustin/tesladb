@@ -45,6 +45,7 @@ dependencies:
 - vector
 - exceptions
 - monad-logger
+- cleff
 - tesla >= 0.7.5.0
 
 default-extensions:
@@ -66,6 +67,7 @@ default-extensions:
   - GeneralizedNewtypeDeriving
   - DeriveGeneric
   - DeriveFunctor
+  - AllowAmbiguousTypes
 
 library:
   source-dirs: src
