@@ -2,7 +2,6 @@ module Main where
 
 import           Cleff
 import           Cleff.Reader
-import           Control.Applicative        (liftA2)
 import           Control.Lens
 import           Control.Monad              (forever, guard, unless, void)
 import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM, try)
@@ -29,14 +28,14 @@ import           UnliftIO                   (TChan, TVar, atomically, mapConcurr
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
-import           Tesla.Auth
 import           Tesla.AuthDB
 import           Tesla.Car                  (VehicleData, currentVehicleID, isCharging, isUserPresent, locationData,
-                                             openDoors, runCar, runNamedCar, vdata, vehicleData)
+                                             openDoors, runNamedCar, vdata, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.Runner
 import           Tesla.SqliteDB
 
+import           Tesla.CarFX
 import           Tesla.Logging
 import           Tesla.Types
 
@@ -66,13 +65,8 @@ dbSink = do
         VData v -> insertVData db v
         _       -> pure ()
 
-mqttSink :: [IOE, LogFX, Reader SinkEnv] :>> es => Eff es ()
+mqttSink :: [IOE, LogFX, CarFX, Reader SinkEnv] :>> es => Eff es ()
 mqttSink = do
-  Options{optDBPath, optVName} <- asks (opts . _sink_options)
-  runNamedCar optVName (loadAuthInfo optDBPath) currentVehicleID >>= mqttSink'
-
-mqttSink' :: [IOE, LogFX, Reader SinkEnv] :>> es => VehicleID -> Eff es ()
-mqttSink' vid = do
   opts@Options{optDBPath} <- asks (opts . _sink_options)
   ch <- asks _sink_chan
   rug <- asks (loopRug . _sink_options)
@@ -160,7 +154,7 @@ mqttSink' vid = do
           respond rt (res r) []
             where cmdname = fromJust . cmd $ t
                   res = either textToBL (const "")
-                  go = catch (runCar (loadAuthInfo optDBPath) vid a) (\(e :: SomeException) ->
+                  go = catch (runCar a) (\(e :: SomeException) ->
                     let msg = "exception occurred in action " <> tshow e in logInfo msg $> Left msg)
 
 
@@ -203,14 +197,12 @@ mqttSink' vid = do
 
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
-{-
         call "cmd/sleep" res _ = do
           unl $ do
             p <- asks (prereq . _sink_options)
             atomically $ writeTVar p CheckAsleep
-            lift $ logInfo "Switching to checkAsleep"
+            logInfo "Switching to checkAsleep"
           respond res "OK" []
--}
 
         -- All RPCs below require a response topic.
 
@@ -245,13 +237,11 @@ checkAsleep' :: IOE :> es => TVar PrereqAction -> VehicleState -> Eff es (Either
 checkAsleep' _ VOnline = pure $ Left "not asleep"
 checkAsleep' p _       = atomically $ writeTVar p CheckAwake $> Left "transitioned to checkAwake"
 
-gather :: [IOE, LogFX] :>> es => State -> TChan Observation -> Eff es ()
+gather :: [IOE, CarFX, LogFX] :>> es => State -> TChan Observation -> Eff es ()
 gather (State Options{..} pv loopRug) ch = do
-    (vid, ai) <- runNamedCar optVName (loadAuthInfo optDBPath) $ liftA2 (,) currentVehicleID teslaAuth
-    -- vid <- currentVehicleID
+    vid <- currentVehicle
     logInfoL ["Looping with vid: ", vid]
-    -- runCar :: MonadIO m => IO AuthInfo -> VehicleID -> Car m a -> m a
-    timeLoop loopRug (fetch ai vid) (process vid)
+    timeLoop loopRug fetch process
 
   where
     naptime :: VehicleData -> Int
@@ -260,20 +250,22 @@ gather (State Options{..} pv loopRug) ch = do
           | isCharging v    = 300
           | otherwise       = 900
 
-    fetch ai vid = do
-              prods <- productsRaw ai
-              liftIO . atomically $ writeTChan ch (PData prods)
-              let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
-              pa <- (liftIO . readTVarIO) pv
-              st <- case pa of
-                CheckAwake  -> checkAwake' state
-                CheckAsleep -> checkAsleep' pv state
-              either (pure . Left) (const (tryt (mergedData vid))) st
+    fetch = do
+      ai <- liftIO $ loadAuthInfo optDBPath
+      prods <- productsRaw ai
+      liftIO . atomically $ writeTChan ch (PData prods)
+      vid <- currentVehicle
+      let state = decodeProducts prods ^?! folded . _ProductVehicle . filtered (\(_,a,_) -> a == vid) . _3
+      pa <- (liftIO . readTVarIO) pv
+      st <- case pa of
+        CheckAwake  -> checkAwake' state
+        CheckAsleep -> checkAsleep' pv state
+      either (pure . Left) (const (tryt mergedData)) st
 
     tryt :: MonadCatch m => m a -> m (Either Text a)
     tryt f = try @_ @SomeException f <&> first (T.pack . show)
 
-    mergedData vid = runCar (loadAuthInfo optDBPath) vid do
+    mergedData = runCar do
       v <- vehicleData
       -- If location data returns valid drive state, patch it into the larger one.
       loc <- try @_ @SomeException locationData
@@ -281,9 +273,9 @@ gather (State Options{..} pv loopRug) ch = do
         Nothing -> pure v
         Just d  -> pure (v & vdata . key "drive_state" .~ d)
 
-    -- process :: [IOE, LogFX] :>> es1 => Text -> Either Text VehicleData -> Car (Eff es1) Int
-    process _ (Left s) = logInfoL ["No data: ", s] $> 300
-    process vid (Right v) = do
+    process (Left s) = logInfoL ["No data: ", s] $> 300
+    process (Right v) = do
+      vid <- currentVehicle
       logInfoL ["Fetched data for vid: ", vid]
       liftIO . atomically $ writeTChan ch (VData v)
       let nt = naptime v
@@ -293,11 +285,12 @@ gather (State Options{..} pv loopRug) ch = do
       pure nt
 
 run :: Options -> IO ()
-run opts@Options{optNoMQTT, optVerbose} = do
+run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
   p <- newTVarIO CheckAwake
   rug <- newTVarIO False
+  vid <- runNamedCar optVName (loadAuthInfo optDBPath) $ currentVehicleID
   let st = State opts p rug
-  runIOE . runLogFX optVerbose $
+  runIOE . runLogFX optVerbose . runCarFX optDBPath vid $
     runSinks st gather ([dbSink, watchdogSink (3600 * 12)]
                                     <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 

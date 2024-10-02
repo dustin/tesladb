@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 3dab984084c41429d5d84f20b25354b65a6138338bcf3ab1005fe3f60d46b8bb
+-- hash: a4efad097765436c181dadba68a760f88242883384b9d5513018e02e5fecdb8c
 
 name:           tesladb
 version:        0.3.0.0
@@ -28,6 +28,7 @@ source-repository head
 library
   exposed-modules:
       Tesla.AuthDB
+      Tesla.CarFX
       Tesla.Logging
       Tesla.PostgresDB
       Tesla.Runner
