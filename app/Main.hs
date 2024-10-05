@@ -1,10 +1,11 @@
 module Main where
 
 import           Cleff
+import           Cleff.Mask                 (Mask (..), bracket, runMask)
 import           Cleff.Reader
 import           Control.Lens
-import           Control.Monad              (forever, guard, unless, void)
-import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), bracket, catch, throwM, try)
+import           Control.Monad              (forever, unless)
+import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), catch, throwM, try)
 import           Data.Aeson                 (Value, decode, encode)
 import           Data.Aeson.Lens
 import           Data.Bifunctor             (first)
@@ -13,10 +14,9 @@ import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Foldable              (asum)
 import           Data.Functor               (($>))
 import qualified Data.Map.Strict            as Map
-import           Data.Maybe                 (fromJust, fromMaybe, isJust, mapMaybe)
+import           Data.Maybe                 (fromJust, fromMaybe, mapMaybe)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
-import           Database.SQLite.Simple     hiding (bind, close)
 import           Network.MQTT.Client
 import           Network.MQTT.Topic
 import           Network.URI
@@ -28,12 +28,12 @@ import           UnliftIO                   (TChan, TVar, atomically, mapConcurr
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
-import           Tesla.AuthDB
 import           Tesla.Car                  (VehicleData, currentVehicleID, isCharging, isUserPresent, locationData,
                                              openDoors, runNamedCar, vdata, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
+import           Tesla.DB
+import           Tesla.RunDB
 import           Tesla.Runner
-import           Tesla.SqliteDB
 
 import           Tesla.CarFX
 import           Tesla.Logging
@@ -51,66 +51,62 @@ options = Options
   <*> switch (long "enable-commands" <> help "enable remote commands")
   <*> strOption (long "product-topic" <> showDefault <> value "tmp/tesla/products" <> help "Raw product topic")
 
-dbSink :: [IOE, Reader SinkEnv] :>> es => Eff es ()
-dbSink = do
-  Options{optDBPath} <- asks (opts . _sink_options)
-  ch <- asks _sink_chan
-  liftIO $ withConnection optDBPath (storeThings ch)
-
+dbSink :: [IOE, DB, Reader SinkEnv] :>> es => Eff es ()
+dbSink = storeThings =<< asks _sink_chan
   where
-    storeThings ch db = do
-      dbInit db
-
+    storeThings ch =
       forever $ atomically (readTChan ch) >>= \case
-        VData v -> insertVData db v
+        VData v -> insertVData v
         _       -> pure ()
 
-mqttSink :: [IOE, LogFX, CarFX, Reader SinkEnv] :>> es => Eff es ()
+mqttSink :: forall es. [IOE, Mask, LogFX, CarFX, DB, Reader SinkEnv] :>> es => Eff es ()
 mqttSink = do
-  opts@Options{optDBPath} <- asks (opts . _sink_options)
+  opts <- asks (opts . _sink_options)
   ch <- asks _sink_chan
   rug <- asks (loopRug . _sink_options)
-  withRunInIO $ \unl -> withConnection optDBPath (\db -> withMQTT db opts rug unl (store opts ch unl))
+  withMQTT opts rug (store opts ch)
 
   where
-    withMQTT db opts rug unl = bracket (connect db opts rug unl) (disco opts unl)
+    withMQTT opts rug = bracket (connect opts rug) (disco opts)
 
-    connect db opts@Options{..} rug unl = do
-      unl $ logInfoL ["Connecting to ", tshow optMQTTURI]
-      mc <- connectURI mqttConfig{_protocol=Protocol50,
-                                  _msgCB=SimpleCallback (tdbAPI opts db rug unl)} optMQTTURI
-      props <- svrProps mc
-      unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
-      subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
-      unl $ logInfoL ["MQTT sub response: ", tshow subr]
-      pure mc
+    connect :: Options -> TVar Bool -> Eff es MQTTClient
+    connect opts@Options{..} rug = do
+      logInfoL ["Connecting to ", tshow optMQTTURI]
+      withRunInIO $ \unl -> do
+        mc <- liftIO $ connectURI mqttConfig{_protocol=Protocol50,
+                                             _msgCB=SimpleCallback (\mc t b props -> unl $ tdbAPI opts rug mc t b props)} optMQTTURI
+        props <- svrProps mc
+        unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
+        subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
+        unl $ logInfoL ["MQTT sub response: ", tshow subr]
+        pure mc
 
-    disco Options{optMQTTURI} unl c = unl $ do
+    disco Options{optMQTTURI} c = do
       logErrorL ["disconnecting from ", tshow optMQTTURI]
       catch (liftIO $ normalDisconnect c) (\(e :: SomeException) ->
                                               logInfoL ["error disconnecting ", tshow e])
       logInfoL ["disconnected from ", tshow optMQTTURI]
 
-    store Options{..} ch unl mc = forever $ do
+    store Options{..} ch mc = forever $ do
       obs <- atomically $ do
         connd <- isConnectedSTM mc
         unless connd $ throwM DisconnectedException
         readTChan ch
-      void . unl . logDbg $ "Delivering vdata via MQTT"
+      logDbg $ "Delivering vdata via MQTT"
       case obs of
         VData v -> do
-          publishq mc optMQTTTopic v True QoS2 [PropMessageExpiryInterval 86400,
-                                                PropContentType "application/json"]
+          liftIO $ publishq mc optMQTTTopic v True QoS2 [PropMessageExpiryInterval 86400,
+                                                         PropContentType "application/json"]
           unless (isUserPresent v) $ idiotCheck (openDoors v)
 
           -- idiotCheck == verify state when user not present
             where idiotCheck [] = pure ()
-                  idiotCheck ds = publishq mc (optMQTTTopic <> "/alert/open")
-                                  ("nobody's there, but the following doors are open: "
-                                   <> (BC.pack . show) ds) False QoS2 []
+                  idiotCheck ds = liftIO $ publishq mc (optMQTTTopic <> "/alert/open")
+                                            ("nobody's there, but the following doors are open: "
+                                             <> (BC.pack . show) ds) False QoS2 []
         PData p -> mapConcurrently_ (\(k,v) ->
-                                       publishq mc k v True QoS2 [PropMessageExpiryInterval 1800,
-                                                                  PropContentType "application/json"]) (expand p)
+                                       liftIO $ publishq mc k v True QoS2 [PropMessageExpiryInterval 1800,
+                                                                           PropContentType "application/json"]) (expand p)
           where
             expand j = (optMQTTProds, encode j) : mapMaybe aj (j ^.. key "response" . _Array . folded . to enc)
             aj (Just a, b) = Just (optMQTTProds <> a, b)
@@ -118,16 +114,16 @@ mqttSink = do
             enc v = (akey v, encode v)
             akey v = mkTopic =<< asum [v ^? key "id_s" . _String, v ^? key "id" . _String]
 
-      unl . logDbg $ "Delivered vdata via MQTT"
+      logDbg "Delivered vdata via MQTT"
 
-    tdbAPI Options{..} db rug unl mc t m props = maybe (pure ()) toCall (cmd t)
+    tdbAPI Options{..} rug mc t m props = maybe (pure ()) toCall (cmd t)
 
       where
         toCall p = do
           tr <- timeout (seconds 10) $ call p ret m
           case tr of
             Nothing -> do
-              unl $ logInfoL ["Timed out calling ", tshow p]
+              logInfoL ["Timed out calling ", tshow p]
               respond ret "timed out" []
             Just _  -> pure ()
 
@@ -147,7 +143,7 @@ mqttSink = do
         respond Nothing _  _    = pure ()
         respond (Just rt) rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
 
-        callCMD rt a = unl do
+        callCMD rt a = do
           logInfoL ["Command requested: ", cmdname]
           r <- if optCMDsEnabled then go else pure (Left "command execution is disabled")
           logInfoL ["Finished command: ", cmdname, " with result: ", tshow r]
@@ -165,7 +161,6 @@ mqttSink = do
         readTwo x = case traverse readMaybe (words . BC.unpack $ x) of
                       (Just [a,b]) -> Just (a,b)
                       _            -> Nothing
-        call :: Text -> Maybe Topic -> BL.ByteString -> IO ()
 
         call "cmd/sw/schedule" res x = callCMD res $ CMD.scheduleUpdate d
           where d = fromMaybe 0 (readMaybe . BC.unpack $ x)
@@ -198,7 +193,7 @@ mqttSink = do
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
         call "cmd/sleep" res _ = do
-          unl $ do
+          do
             p <- asks (prereq . _sink_options)
             atomically $ writeTVar p CheckAsleep
             logInfo "Switching to checkAsleep"
@@ -206,27 +201,28 @@ mqttSink = do
 
         -- All RPCs below require a response topic.
 
-        call p Nothing _ = unl $ logInfoL ["request to ", tshow p, " with no response topic"]
+        call p Nothing _ = logInfoL ["request to ", tshow p, " with no response topic"]
 
         call "days" res _ = do
-          unl $ logInfoL ["Days call responding to ", tshow res]
-          days <- listDays db
+          logInfoL ["Days call responding to ", tshow res]
+          days <- listDays
           respond res (encode . Map.fromList $ days) [PropContentType "application/json"]
 
         call "day" res d = do
-          unl $ logInfoL ["Day call for ", tshow d, " responding to ", tshow res]
-          days <- listDay db (BC.unpack d)
+          logInfoL ["Day call for ", tshow d, " responding to ", tshow res]
+          days <- listDay (BC.unpack d)
           respond res (encode days) [PropContentType "application/json"]
 
         call "fetch" res tss = do
-          unl $ logInfoL ["Fetch call for ", tshow tss, " responding to ", tshow res]
-          let mts = decode ("\"" <> tss <> "\"")
-          guard $ isJust mts
-          v <- fetchDatum db (fromJust mts)
-          respond res v [PropContentType "application/json"]
+          logInfoL ["Fetch call for ", tshow tss, " responding to ", tshow res]
+          case decode ("\"" <> tss <> "\"") of
+            Nothing -> pure ()
+            Just ts -> do
+              v <- fetchDatum ts
+              respond res v [PropContentType "application/json"]
 
         call x res _ = do
-          unl $ logInfoL ["Call to invalid path: ", tshow x]
+          logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
 checkAwake' :: IOE :> es => VehicleState -> Eff es (Either Text ())
@@ -237,8 +233,8 @@ checkAsleep' :: IOE :> es => TVar PrereqAction -> VehicleState -> Eff es (Either
 checkAsleep' _ VOnline = pure $ Left "not asleep"
 checkAsleep' p _       = atomically $ writeTVar p CheckAwake $> Left "transitioned to checkAwake"
 
-gather :: [IOE, CarFX, LogFX] :>> es => State -> TChan Observation -> Eff es ()
-gather (State Options{..} pv loopRug) ch = do
+gather :: [IOE, CarFX, DB, LogFX] :>> es => State -> TChan Observation -> Eff es ()
+gather (State _opts pv loopRug) ch = do
     vid <- currentVehicle
     logInfoL ["Looping with vid: ", vid]
     timeLoop loopRug fetch process
@@ -251,7 +247,7 @@ gather (State Options{..} pv loopRug) ch = do
           | otherwise       = 900
 
     fetch = do
-      ai <- liftIO $ loadAuthInfo optDBPath
+      ai <- loadAuthInfo
       prods <- productsRaw ai
       liftIO . atomically $ writeTChan ch (PData prods)
       vid <- currentVehicle
@@ -280,19 +276,21 @@ gather (State Options{..} pv loopRug) ch = do
       liftIO . atomically $ writeTChan ch (VData v)
       let nt = naptime v
       logInfoL ["Sleeping for ", tshow nt,
-                      " user present: ", tshow $ isUserPresent v,
-                      ", charging: ", tshow $ isCharging v]
+                 "user present: ", tshow $ isUserPresent v,
+                 ", charging: ", tshow $ isCharging v]
       pure nt
 
 run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
   p <- newTVarIO CheckAwake
   rug <- newTVarIO False
-  vid <- runNamedCar optVName (loadAuthInfo optDBPath) $ currentVehicleID
-  let st = State opts p rug
-  runIOE . runLogFX optVerbose . runCarFX optDBPath vid $
-    runSinks st gather ([dbSink, watchdogSink (3600 * 12)]
-                                    <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+  runIOE . runMask . withDB optDBPath $ do
+    initDB
+    vid <- withRunInIO $ \unl -> runNamedCar optVName (unl loadAuthInfo) $ currentVehicleID
+    runLogFX optVerbose . runCarFX vid $ do
+      let st = State opts p rug
+      runSinks st gather ([dbSink, watchdogSink (3600 * 12)]
+                                      <> [excLoop "mqtt" mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts

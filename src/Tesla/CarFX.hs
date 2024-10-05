@@ -3,9 +3,9 @@
 module Tesla.CarFX where
 
 import           Cleff
-import           Tesla.AuthDB
-import qualified Tesla.Car    as Car
-import           Tesla.Car    (Car, VehicleID)
+import qualified Tesla.Car as Car
+import           Tesla.Car (Car, VehicleID)
+import           Tesla.DB
 
 data CarFX :: Effect where
     CurrentVehicle :: CarFX m VehicleID
@@ -13,7 +13,7 @@ data CarFX :: Effect where
 
 makeEffect ''CarFX
 
-runCarFX :: (IOE :> es) => FilePath -> VehicleID -> Eff (CarFX : es) a -> Eff es a
-runCarFX dbPath vid = interpret \case
+runCarFX :: ([IOE, DB] :>> es) => VehicleID -> Eff (CarFX : es) a -> Eff es a
+runCarFX vid = interpret \case
     CurrentVehicle -> pure vid
-    RunCar a       -> liftIO $ Car.runCar (loadAuthInfo dbPath) vid a
+    RunCar a       -> withRunInIO $ \unl -> Car.runCar (unl loadAuthInfo) vid a

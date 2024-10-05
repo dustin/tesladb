@@ -98,7 +98,6 @@ executables:
     - -Wall
     dependencies:
     - tesladb
-
   teslacatcher:
     main:                Main.hs
     source-dirs:         app/catcher
@@ -110,14 +109,4 @@ executables:
     dependencies:
     - tesladb
     - net-mqtt-rpc >= 0.2
-
-  tesladbfix:
-    main:                Main.hs
-    source-dirs:         app/tsfix
-    ghc-options:
-    - -threaded
-    - -rtsopts
-    - -with-rtsopts=-N
-    - -Wall
-    dependencies:
-    - tesladb
+  

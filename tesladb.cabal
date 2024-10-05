@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a4efad097765436c181dadba68a760f88242883384b9d5513018e02e5fecdb8c
+-- hash: e69db269e8af580211366ac3ad08c5912ceb8dec35071544934f8a45535314f8
 
 name:           tesladb
 version:        0.3.0.0
@@ -27,12 +27,13 @@ source-repository head
 
 library
   exposed-modules:
-      Tesla.AuthDB
       Tesla.CarFX
+      Tesla.DB
+      Tesla.DB.Postgres
+      Tesla.DB.SQLite
       Tesla.Logging
-      Tesla.PostgresDB
+      Tesla.RunDB
       Tesla.Runner
-      Tesla.SqliteDB
       Tesla.Types
   other-modules:
       Paths_tesladb
@@ -175,64 +176,6 @@ executable tesladb
       DeriveFunctor
       AllowAmbiguousTypes
   ghc-options: -threaded -rtsopts -eventlog -with-rtsopts=-N -Wall -O2
-  build-depends:
-      aeson
-    , async
-    , base >=4.7 && <5
-    , bytestring
-    , cleff
-    , containers
-    , exceptions
-    , generic-deriving
-    , http-client
-    , lens
-    , lens-aeson
-    , monad-logger
-    , mtl
-    , net-mqtt >=0.8
-    , network-uri
-    , optparse-applicative
-    , postgresql-simple
-    , sqlite-simple
-    , stm
-    , tesla >=0.7.5.0
-    , tesladb
-    , text
-    , time
-    , transformers
-    , unliftio
-    , unliftio-core
-    , vector
-    , wreq
-  default-language: Haskell2010
-
-executable tesladbfix
-  main-is: Main.hs
-  other-modules:
-      Paths_tesladb
-  hs-source-dirs:
-      app/tsfix
-  default-extensions:
-      OverloadedStrings
-      RecordWildCards
-      NamedFieldPuns
-      UndecidableInstances
-      GADTs
-      KindSignatures
-      LambdaCase
-      BlockArguments
-      TypeOperators
-      RankNTypes
-      FlexibleContexts
-      DataKinds
-      ConstraintKinds
-      ScopedTypeVariables
-      TypeApplications
-      GeneralizedNewtypeDeriving
-      DeriveGeneric
-      DeriveFunctor
-      AllowAmbiguousTypes
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall
   build-depends:
       aeson
     , async
