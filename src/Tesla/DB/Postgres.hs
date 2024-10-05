@@ -36,7 +36,7 @@ pdbInit db = void $ execute_ db [sql|
                                      vts timestamptz generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored,
                                      data jsonb not null
                                    );
-                                   create table if not exists authinfo (ts datetime, access_token varchar, refresh_token varchar, expires_in int);
+                                   create table if not exists authinfo (ts timestamp, access_token varchar, refresh_token varchar, expires_in int);
                                    |]
 
 pinsertVData :: Connection -> VehicleData -> IO ()
