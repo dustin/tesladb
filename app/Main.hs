@@ -92,7 +92,7 @@ mqttSink = do
         connd <- isConnectedSTM mc
         unless connd $ throwM DisconnectedException
         readTChan ch
-      logDbg $ "Delivering vdata via MQTT"
+      logDbg "Delivering vdata via MQTT"
       case obs of
         VData v -> do
           liftIO $ publishq mc optMQTTTopic v True QoS2 [PropMessageExpiryInterval 86400,
@@ -193,10 +193,9 @@ mqttSink = do
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
         call "cmd/sleep" res _ = do
-          do
-            p <- asks (prereq . _sink_options)
-            atomically $ writeTVar p CheckAsleep
-            logInfo "Switching to checkAsleep"
+          p <- asks (prereq . _sink_options)
+          atomically $ writeTVar p CheckAsleep
+          logInfo "Switching to checkAsleep"
           respond res "OK" []
 
         -- All RPCs below require a response topic.
@@ -225,7 +224,7 @@ mqttSink = do
           logInfoL ["Call to invalid path: ", tshow x]
           respond res "Invalid command" []
 
-checkAwake' :: IOE :> es => VehicleState -> Eff es (Either Text ())
+checkAwake' :: VehicleState -> Eff es (Either Text ())
 checkAwake' VOnline = pure $ Right ()
 checkAwake' st      = pure $ Left ("not awake, current status: " <> tshow st)
 
@@ -286,7 +285,7 @@ run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
   rug <- newTVarIO False
   runIOE . runMask . withDB optDBPath $ do
     initDB
-    vid <- withRunInIO $ \unl -> runNamedCar optVName (unl loadAuthInfo) $ currentVehicleID
+    vid <- withRunInIO $ \unl -> runNamedCar optVName (unl loadAuthInfo) currentVehicleID
     runLogFX optVerbose . runCarFX vid $ do
       let st = State opts p rug
       runSinks st gather ([dbSink, watchdogSink (3600 * 12)]

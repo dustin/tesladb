@@ -73,8 +73,7 @@ watchdogSink secs = do
     where
       checkTimeout v = (check =<< readTVar v) $> False
 
--- timeLoop :: ([IOE, LogFX] :>> es, MonadUnliftIO m) => TVar Bool -> m t -> (t -> m Int) -> Eff es ()
-timeLoop :: MonadUnliftIO m => TVar Bool -> m a -> (a -> m Int) -> m b
+timeLoop :: IOE :> es => TVar Bool -> Eff es a -> (a -> Eff es Int) -> Eff es ()
 timeLoop rug a p = forever (delay =<< process =<< timeout (seconds 30) a)
 
   where

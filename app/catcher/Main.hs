@@ -4,7 +4,7 @@ import           Cleff
 import           Cleff.Fail
 import           Cleff.Mask
 import           Control.Monad              (unless, (<=<))
-import           Control.Monad.Catch        (SomeException (..), try)
+import           Control.Monad.Catch        (SomeException (..), catch)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -47,9 +47,6 @@ data Options = Options {
 blToText :: BL.ByteString -> Text
 blToText = TE.decodeUtf8 . BL.toStrict
 
-lstr :: Show a => a -> Text
-lstr = pack . show
-
 options :: Parser Options
 options = Options
   <$> strOption (long "dbpath" <> showDefault <> value "tesla.db" <> help "tesladb path")
@@ -76,21 +73,19 @@ withMQTT Options{..} cb = bracket conn (liftIO . normalDisconnect)
                                                        PropRequestProblemInformation 1]}
             optMQTTURI
       ack <- connACK mc
-      unl $ logDbgL ["MQTT connected: ", lstr ack]
+      unl $ logDbgL ["MQTT connected: ", tshow ack]
       pure mc
 
 logData :: LogFX :> es => VehicleData -> Eff es ()
 logData vd = unless (up || null od) $ logInfoL [
-  "User is not present, but the following doors are open at ", lstr ts, ": ", lstr od]
+  "User is not present, but the following doors are open at ", tshow ts, ": ", tshow od]
   where
     up = isUserPresent vd
     od = openDoors vd
     ts = teslaTS vd
 
 tryInsert :: [IOE, Mask, LogFX, DB] :>> es => VehicleData -> Eff es ()
-tryInsert vd = try (insertVData vd) >>= \case
-  Left (e :: SomeException) -> logErrorL ["Error on ", lstr . maybeTeslaTS $ vd, ": ", lstr e]
-  Right _                   -> pure ()
+tryInsert vd = catch (insertVData vd) (\(e :: SomeException) -> logErrorL ["Error on ", tshow . maybeTeslaTS $ vd, ": ", tshow e])
 
 backfill :: forall es. [IOE, Mask, Fail, DB, LogFX] :>> es => MQTTClient -> Filter -> Eff es ()
 backfill mc dfilter = do
@@ -115,14 +110,14 @@ backfill mc dfilter = do
         (Just rday, lday) <- concurrently (remoteDay (BC.pack d)) (Set.fromList <$> listDay d)
         let missing = Set.difference rday lday
             extra = Set.difference lday rday
-        logDbgL ["missing: ", lstr missing]
-        logDbgL ["extra: ", lstr extra]
+        logDbgL ["missing: ", tshow missing]
+        logDbgL ["extra: ", tshow extra]
 
         mapConcurrently_ doOne missing
 
       doOne ts = do
         let (Just k) = (inner . encode) ts
-        logDbgL ["Fetching remote data from ", lstr ts]
+        logDbgL ["Fetching remote data from ", tshow ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
         tryInsert vd
@@ -134,7 +129,7 @@ storeThings opts@Options{..} =
   withMQTT opts sink $ \mc -> do
     subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
                                                              _retainHandling=SendOnSubscribeNew})] []
-    logDbgL ["Sub response: ", lstr subr]
+    logDbgL ["Sub response: ", tshow subr]
 
     unless optNoBackfill $ backfill mc optMQTTTopic
 

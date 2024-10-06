@@ -22,19 +22,13 @@ options = Options
 getToken :: IO String
 getToken = putStr "Paste in a refresh token: " *> hFlush stdout *> getLine
 
-login :: [IOE, DB] :>> es => Eff es ()
-login = updateAuth . AuthResponse "" 0 =<< liftIO getToken
-
-refresh :: [IOE, DB] :>> es => Eff es ()
-refresh = updateAuth =<< liftIO . refreshAuth =<< loadAuth
-
 dispatch :: [IOE, DB] :>> es => Options -> Eff es ()
 dispatch Options{optRefresh}
-  | optRefresh = refresh
-  | otherwise = login
+  | optRefresh = updateAuth =<< liftIO . refreshAuth =<< loadAuth
+  | otherwise = updateAuth . AuthResponse "" 0 =<< liftIO getToken
 
 run :: Options -> IO ()
-run opts@Options{optDBPath} = do
+run opts@Options{optDBPath} =
   runIOE . withDB optDBPath $ do
     initDB
     dispatch opts
