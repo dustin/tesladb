@@ -275,7 +275,7 @@ gather (State _opts pv loopRug) ch = do
       liftIO . atomically $ writeTChan ch (VData v)
       let nt = naptime v
       logInfoL ["Sleeping for ", tshow nt,
-                 "user present: ", tshow $ isUserPresent v,
+                 ", user present: ", tshow $ isUserPresent v,
                  ", charging: ", tshow $ isCharging v]
       pure nt
 
