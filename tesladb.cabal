@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: e69db269e8af580211366ac3ad08c5912ceb8dec35071544934f8a45535314f8
+-- hash: cdc9ba8fdaaced6c453883883e176d94447db39b8290786c889c21ee01b63dbe
 
 name:           tesladb
 version:        0.3.0.0
@@ -69,6 +69,9 @@ library
     , containers
     , exceptions
     , generic-deriving
+    , hasql
+    , hasql-th
+    , hasql-transaction
     , http-client
     , lens
     , lens-aeson
@@ -77,7 +80,6 @@ library
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
-    , postgresql-simple
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -126,6 +128,9 @@ executable teslacatcher
     , containers
     , exceptions
     , generic-deriving
+    , hasql
+    , hasql-th
+    , hasql-transaction
     , http-client
     , lens
     , lens-aeson
@@ -135,7 +140,6 @@ executable teslacatcher
     , net-mqtt-rpc >=0.2
     , network-uri
     , optparse-applicative
-    , postgresql-simple
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -185,6 +189,9 @@ executable tesladb
     , containers
     , exceptions
     , generic-deriving
+    , hasql
+    , hasql-th
+    , hasql-transaction
     , http-client
     , lens
     , lens-aeson
@@ -193,7 +200,6 @@ executable tesladb
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
-    , postgresql-simple
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -243,6 +249,9 @@ executable teslauth
     , containers
     , exceptions
     , generic-deriving
+    , hasql
+    , hasql-th
+    , hasql-transaction
     , http-client
     , lens
     , lens-aeson
@@ -251,7 +260,6 @@ executable teslauth
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
-    , postgresql-simple
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0

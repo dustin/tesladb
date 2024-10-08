@@ -31,7 +31,9 @@ dependencies:
 - http-client
 - containers
 - sqlite-simple
-- postgresql-simple
+- hasql
+- hasql-th
+- hasql-transaction
 - optparse-applicative
 - network-uri
 - async
