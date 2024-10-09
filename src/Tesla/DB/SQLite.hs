@@ -3,7 +3,7 @@
 module Tesla.DB.SQLite (runConn, runStr) where
 
 import           Cleff
-import           Control.Monad          (guard)
+import           Control.Exception      (Exception (..), throwIO)
 import           Data.Time.Clock        (UTCTime)
 import           Database.SQLite.Simple hiding (bind, close)
 import           Tesla.Auth             (AuthResponse (..))
@@ -24,6 +24,13 @@ runConn db = interpret \case
   UpdateAuth ar     -> liftIO $ supdateAuth db ar
   LoadAuth          -> liftIO $ sloadAuth db
 
+data NotEnough = NotEnough
+    deriving (Show)
+
+instance Exception NotEnough
+
+one :: (MonadIO m, Foldable t) => t a -> m a
+one = maybe (liftIO $ throwIO NotEnough) pure . foldr (\x _ -> Just x) Nothing
 
 sdbInit :: Connection -> IO ()
 sdbInit db = do
@@ -42,10 +49,7 @@ slistDay :: Connection -> String -> IO [UTCTime]
 slistDay db d = fmap fromOnly <$> query db "select ts from data where date(ts) = ?" (Only d)
 
 sfetchDatum :: Connection -> UTCTime -> IO VehicleData
-sfetchDatum db t = do
-  rows <- query db "select data from data where ts = ?" (Only t)
-  guard $ length rows == 1
-  pure . fromOnly . head $ rows
+sfetchDatum db t = fmap fromOnly . one =<< query db "select data from data where ts = ?" (Only t)
 
 instance ToRow AuthResponse where
   toRow (AuthResponse tok expiry refresh) = toRow (tok, refresh, expiry)
@@ -60,4 +64,4 @@ supdateAuth db ar =
     execute db "insert into authinfo(ts, access_token, refresh_token, expires_in) values(current_timestamp, ?, ?, ?)" ar
 
 sloadAuth :: Connection -> IO AuthResponse
-sloadAuth db = head <$> query_ db "select access_token, expires_in, refresh_token from authinfo"
+sloadAuth db = one =<< query_ db "select access_token, expires_in, refresh_token from authinfo"
