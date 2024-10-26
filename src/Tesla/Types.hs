@@ -21,8 +21,6 @@ data Options = Options {
   , optMQTTProds   :: Topic
   }
 
--- type PrereqAction = VehicleState -> Car m (Either Text ())
-
 data PrereqAction = CheckAwake | CheckAsleep deriving (Show, Eq)
 
 data State = State {
