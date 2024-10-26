@@ -9,7 +9,6 @@ import           Control.Monad.Catch        (MonadCatch (..), SomeException (..)
 import           Data.Aeson                 (Value, decode, encode)
 import           Data.Aeson.Lens
 import           Data.Bifunctor             (first)
-import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
 import           Data.Foldable              (asum)
 import           Data.Functor               (($>))
@@ -37,6 +36,7 @@ import           Tesla.Runner
 
 import           Tesla.CarFX
 import           Tesla.Logging
+import           Tesla.MQTTFX
 import           Tesla.Types
 
 options :: Parser Options
@@ -67,14 +67,14 @@ mqttSink = do
   withMQTT opts rug (store opts ch)
 
   where
-    withMQTT opts rug = bracket (connect opts rug) (disco opts)
+    withMQTT opts rug a = bracket (connect opts rug) (disco opts) (flip runMQTT a)
 
     connect :: Options -> TVar Bool -> Eff es MQTTClient
     connect opts@Options{..} rug = do
       logInfoL ["Connecting to ", tshow optMQTTURI]
       withRunInIO $ \unl -> do
         mc <- liftIO $ connectURI mqttConfig{_protocol=Protocol50,
-                                             _msgCB=SimpleCallback (\mc t b props -> unl $ tdbAPI opts rug mc t b props)} optMQTTURI
+                                             _msgCB=SimpleCallback (\mc t b props -> unl $ runMQTT mc $ tdbAPI opts rug t b props)} optMQTTURI
         props <- svrProps mc
         unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
         subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
@@ -87,26 +87,21 @@ mqttSink = do
                                               logInfoL ["error disconnecting ", tshow e])
       logInfoL ["disconnected from ", tshow optMQTTURI]
 
-    store Options{..} ch mc = forever $ do
-      obs <- atomically $ do
+    store Options{..} ch = forever $ do
+      obs <- atomicMQTT $ \mc -> do
         connd <- isConnectedSTM mc
         unless connd $ throwM DisconnectedException
         readTChan ch
       logDbg "Delivering vdata via MQTT"
       case obs of
         VData v -> do
-          liftIO $ publishq mc optMQTTTopic v True QoS2 [PropMessageExpiryInterval 86400,
-                                                         PropContentType "application/json"]
+          publishRetained optMQTTTopic 86400 v
           unless (isUserPresent v) $ idiotCheck (openDoors v)
 
           -- idiotCheck == verify state when user not present
             where idiotCheck [] = pure ()
-                  idiotCheck ds = liftIO $ publishq mc (optMQTTTopic <> "/alert/open")
-                                            ("nobody's there, but the following doors are open: "
-                                             <> (BC.pack . show) ds) False QoS2 []
-        PData p -> mapConcurrently_ (\(k,v) ->
-                                       liftIO $ publishq mc k v True QoS2 [PropMessageExpiryInterval 1800,
-                                                                           PropContentType "application/json"]) (expand p)
+                  idiotCheck ds = publishEphemeral (optMQTTTopic <> "/alert/open") (encode (show <$> ds))
+        PData p -> mapConcurrently_ (\(k,v) ->  publishRetained k 1800 v) (expand p)
           where
             expand j = (optMQTTProds, encode j) : mapMaybe aj (j ^.. key "response" . _Array . folded . to enc)
             aj (Just a, b) = Just (optMQTTProds <> a, b)
@@ -116,12 +111,11 @@ mqttSink = do
 
       logDbg "Delivered vdata via MQTT"
 
-    tdbAPI Options{..} rug mc t m props = maybe (pure ()) toCall (cmd t)
+    tdbAPI Options{..} rug t m props = maybe (pure ()) toCall (cmd t)
 
       where
-        toCall p = do
-          tr <- timeout (seconds 10) $ call p ret m
-          case tr of
+        toCall :: Text -> Eff (MQTTFX : es) ()
+        toCall p = timeout (seconds 10) (call p ret m) >>= \case
             Nothing -> do
               logInfoL ["Timed out calling ", tshow p]
               respond ret "timed out" []
@@ -139,9 +133,8 @@ mqttSink = do
             f PropUserProperty{}    = True
             f _                     = False
 
-        respond :: MonadIO m => Maybe Topic -> BL.ByteString -> [Property] -> m ()
         respond Nothing _  _    = pure ()
-        respond (Just rt) rm rp = liftIO $ publishq mc rt rm False QoS2 (rp <> rprops)
+        respond (Just rt) rm rp = publishMQTT rt 0 rm (rp <> rprops)
 
         callCMD rt a = do
           logInfoL ["Command requested: ", cmdname]

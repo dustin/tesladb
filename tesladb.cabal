@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: cdc9ba8fdaaced6c453883883e176d94447db39b8290786c889c21ee01b63dbe
+-- hash: d79a9c650bc7f8b038ec645a02284a40e33541b56823840ecf34271343f78a3a
 
 name:           tesladb
 version:        0.3.0.0
@@ -32,6 +32,7 @@ library
       Tesla.DB.Postgres
       Tesla.DB.SQLite
       Tesla.Logging
+      Tesla.MQTTFX
       Tesla.RunDB
       Tesla.Runner
       Tesla.Types
