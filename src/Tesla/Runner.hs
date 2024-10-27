@@ -1,7 +1,6 @@
 module Tesla.Runner where
 
 import           Cleff
-import           Cleff.Reader
 import           Control.Concurrent       (threadDelay)
 import           Control.Concurrent.Async (AsyncCancelled (..))
 import           Control.Concurrent.STM   (TChan, TVar, atomically, check, dupTChan, newBroadcastTChanIO, orElse,
@@ -12,16 +11,12 @@ import qualified Data.ByteString.Lazy     as BL
 import           Data.Functor             (($>))
 import           Data.Text                (Text)
 import qualified Data.Text.Encoding       as TE
-import           Tesla.Types
 import           UnliftIO.Async           (async, race_, waitAnyCancel)
 import           UnliftIO.Timeout         (timeout)
 
 import           Tesla.Logging
-
-data SinkEnv = SinkEnv {
-  _sink_options :: State,
-  _sink_chan    :: TChan Observation
-}
+import           Tesla.Sink
+import           Tesla.Types
 
 newtype DeathException = Die String deriving(Eq, Show)
 
@@ -40,7 +35,7 @@ textToBL = BL.fromStrict . TE.encodeUtf8
 die :: String -> IO ()
 die = throwM . Die
 
-excLoop :: forall es. [IOE, LogFX, Reader SinkEnv] :>> es => Text -> Eff es () -> Eff es ()
+excLoop :: forall es. [IOE, LogFX, Sink] :>> es => Text -> Eff es () -> Eff es ()
 excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
 
   where
@@ -61,11 +56,10 @@ seconds = (* 1000000)
 raceABunch_ :: MonadUnliftIO m => [m a] -> m ()
 raceABunch_ = traverse async >=> void.waitAnyCancel
 
-watchdogSink :: [IOE, LogFX, Reader SinkEnv] :>> es => Int -> Eff es ()
+watchdogSink :: [IOE, LogFX, Sink] :>> es => Int -> Eff es ()
 watchdogSink secs = do
-  ch <- asks _sink_chan
   tov <- liftIO $ registerDelay (seconds secs)
-  again <- liftIO $ atomically $ (True <$ readTChan ch) `orElse` checkTimeout tov
+  again <- runAtomicSink $ \ch -> (True <$ readTChan ch) `orElse` checkTimeout tov
   logDbgL ["Watchdog returned ", tshow again]
   unless again $ liftIO $ die "Watchdog timeout"
   watchdogSink secs
@@ -89,11 +83,11 @@ timeLoop rug a p = forever (delay =<< process =<< timeout (seconds 30) a)
         check (v1 || v2)
         writeTVar rug False
 
-runSinks :: [IOE, LogFX] :>> es => State -> (State -> TChan Observation -> Eff es ()) -> [Eff (Reader SinkEnv:es) ()] -> Eff es ()
+runSinks :: [IOE, LogFX] :>> es => State -> (State -> TChan Observation -> Eff es ()) -> [Eff (Sink:es) ()] -> Eff es ()
 runSinks st gather sinks = do
   tch <- liftIO newBroadcastTChanIO
-  race_ (gather st tch) (raceABunch_ ((\f -> runSink f =<< d tch) <$> sinks))
+  race_ (gather st tch) (raceABunch_ ((\f -> runSub f =<< d tch) <$> sinks))
 
   where
     d = liftIO . atomically . dupTChan
-    runSink f ch = runReader (SinkEnv st ch) f
+    runSub f ch = runSink (SinkEnv st ch) f

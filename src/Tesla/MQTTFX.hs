@@ -3,7 +3,7 @@
 module Tesla.MQTTFX where
 
 import           Cleff
-import           Control.Concurrent.STM (STM, atomically)
+import           Control.Concurrent.STM (STM)
 import           Data.ByteString.Lazy   (ByteString)
 import           Data.Word              (Word32)
 import           Network.MQTT.Client    (MQTTClient, Property (..), QoS (..), Topic, publishq)
@@ -14,7 +14,7 @@ data MQTTFX :: Effect where
     -- | If seconds is 0, we don't retain.  If it's > 0, we retain for this long.
     PublishMQTT :: Topic -> Seconds -> ByteString -> [Property] -> MQTTFX m ()
     -- | We have a case where we need to mix some STM with MQTT client STM ops.
-    AtomicMQTT :: (MQTTClient -> STM a) -> MQTTFX m a
+    AtomicMQTT :: (MQTTClient -> STM a) -> MQTTFX m (STM a)
 
 makeEffect ''MQTTFX
 
@@ -23,7 +23,7 @@ runMQTT mc = interpret \case
     PublishMQTT topic 0 payload props -> liftIO $ publishq mc topic payload False QoS2 props
     PublishMQTT topic secs payload props -> liftIO $ publishq mc topic payload False QoS2 (
         PropMessageExpiryInterval secs : props)
-    AtomicMQTT f -> liftIO $ atomically $ f mc
+    AtomicMQTT f -> pure (f mc)
 
 -- | Common mechanism to publish a retained JSON message.
 publishRetained :: MQTTFX :> es => Topic -> Seconds -> ByteString -> Eff es ()

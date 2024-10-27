@@ -2,7 +2,6 @@ module Main where
 
 import           Cleff
 import           Cleff.Mask                 (Mask (..), bracket, runMask)
-import           Cleff.Reader
 import           Control.Lens
 import           Control.Monad              (forever, unless)
 import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), catch, throwM, try)
@@ -37,6 +36,7 @@ import           Tesla.Runner
 import           Tesla.CarFX
 import           Tesla.Logging
 import           Tesla.MQTTFX
+import           Tesla.Sink
 import           Tesla.Types
 
 options :: Parser Options
@@ -51,20 +51,16 @@ options = Options
   <*> switch (long "enable-commands" <> help "enable remote commands")
   <*> strOption (long "product-topic" <> showDefault <> value "tmp/tesla/products" <> help "Raw product topic")
 
-dbSink :: [IOE, DB, Reader SinkEnv] :>> es => Eff es ()
-dbSink = storeThings =<< asks _sink_chan
-  where
-    storeThings ch =
-      forever $ atomically (readTChan ch) >>= \case
-        VData v -> insertVData v
-        _       -> pure ()
+dbSink :: [IOE, DB, Sink] :>> es => Eff es ()
+dbSink = forever (runAtomicSink readTChan) >>= \case
+            VData v -> insertVData v
+            _       -> pure ()
 
-mqttSink :: forall es. [IOE, Mask, LogFX, CarFX, DB, Reader SinkEnv] :>> es => Eff es ()
+mqttSink :: forall es. [IOE, Mask, LogFX, CarFX, DB, Sink] :>> es => Eff es ()
 mqttSink = do
-  opts <- asks (opts . _sink_options)
-  ch <- asks _sink_chan
-  rug <- asks (loopRug . _sink_options)
-  withMQTT opts rug (store opts ch)
+  opts <- sinkOption opts
+  rug <- sinkOption loopRug
+  withMQTT opts rug (store opts)
 
   where
     withMQTT opts rug a = bracket (connect opts rug) (disco opts) (flip runMQTT a)
@@ -87,11 +83,13 @@ mqttSink = do
                                               logInfoL ["error disconnecting ", tshow e])
       logInfoL ["disconnected from ", tshow optMQTTURI]
 
-    store Options{..} ch = forever $ do
-      obs <- atomicMQTT $ \mc -> do
-        connd <- isConnectedSTM mc
+    store Options{..} = forever $ do
+      checkConn <- atomicMQTT isConnectedSTM
+      readObs <- atomicSink readTChan
+      obs <- atomically $ do
+        connd <- checkConn
         unless connd $ throwM DisconnectedException
-        readTChan ch
+        readObs
       logDbg "Delivering vdata via MQTT"
       case obs of
         VData v -> do
@@ -186,7 +184,7 @@ mqttSink = do
         call "cmd/poll" _ _ = atomically $ writeTVar rug True
 
         call "cmd/sleep" res _ = do
-          p <- asks (prereq . _sink_options)
+          p <- sinkOption prereq
           atomically $ writeTVar p CheckAsleep
           logInfo "Switching to checkAsleep"
           respond res "OK" []

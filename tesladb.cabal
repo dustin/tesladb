@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: d79a9c650bc7f8b038ec645a02284a40e33541b56823840ecf34271343f78a3a
+-- hash: 8ce3d0951c30a7b8326d798d7015657e48dc2cb243b3ccdf61a8773f9f4c0676
 
 name:           tesladb
 version:        0.3.0.0
@@ -35,6 +35,7 @@ library
       Tesla.MQTTFX
       Tesla.RunDB
       Tesla.Runner
+      Tesla.Sink
       Tesla.Types
   other-modules:
       Paths_tesladb
