@@ -1,4 +1,4 @@
-name: Haskell CI
+name: Haskell
 
 on:
   push:
@@ -7,46 +7,75 @@ on:
     branches: [ master ]
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
+  stack:
+    runs-on: 'ubuntu-latest'
+    steps:
+    - uses: actions/checkout@v4
 
-    runs-on: ${{ matrix.os }}
+    - name: Cache Key
+      id: cache_key
+      run: echo "key=$(md5sum stack.yaml | awk '{print $1}')" >> $GITHUB_ENV
 
+    - name: Cache Dependencies
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.stack
+        key: ubuntu-latest-${{ env.key }}
+
+    - name: Build Snapshot
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        stack --no-terminal test --bench --only-snapshot
+
+    - name: Build & Test
+      run: stack --no-terminal test --bench --no-run-benchmarks
+
+  cabal:
+    runs-on: 'ubuntu-latest'
     steps:
     - uses: actions/checkout@v4
 
     - name: Set up Haskell
       uses: haskell-actions/setup@v2
+      id: setup
       with:
-        ghc-version: '9.6.4'
+        ghc-version: '9.6'
         cabal-version: 'latest'
 
-    - name: Update Cabal Package List
-      run: cabal update
+    - name: Generate Cache Keys
+      id: cache_key
+      run: |
+        echo "ghc_ver=${{ steps.setup.outputs.ghc-version }}" >> $GITHUB_ENV
+        cabal freeze
+        echo "dep_hash=$(md5sum cabal.project.freeze | awk '{print $1}')" >> $GITHUB_ENV
 
     - name: Cache Dependencies
       id: cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
-          ~/.cabal/store
+          ~/.cabal
           dist-newstyle
-        key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project*') }}
+        key: ubuntu-latest-ghc-${{ env.ghc_ver }}-cabal-${{ env.dep_hash }}
+        restore-keys: |
+          ubuntu-latest-ghc-${{ env.ghc_ver }}-cabal-
+          ubuntu-latest-ghc-${{ env.ghc_ver }}-
+          ubuntu-latest-
 
-    - name: Build Dependencies
+    - name: Install tasty-discover
       if: steps.cache.outputs.cache-hit != 'true'
-      run: cabal build --only-dependencies
+      run: cabal install --overwrite-policy=always tasty-discover
 
     - name: Build & Test
       run: |
-        cabal build all
-        cabal test all
+        cabal build
+        cabal test --test-show-details=streaming
         cabal install exe:teslauth exe:tesladb exe:teslacatcher --installdir=./dist --overwrite-policy=always
 
     - name: Store Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: tesladb-${{ matrix.os }}
+        name: tesladb-ubuntu-latest
         path: dist
+  
