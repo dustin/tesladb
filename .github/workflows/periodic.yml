@@ -3,9 +3,25 @@ name: Periodic
 on:
   workflow_dispatch:
   schedule:
-  - cron: "0 0 * * 1"
+  - cron: "19 6 * * 1"
 
 jobs:
+  check_date:
+    runs-on: ubuntu-latest
+    name: Check latest commit
+    outputs:
+      should_run: ${{ steps.should_run.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: print latest_commit
+        run: echo ${{ github.sha }}
+
+      - id: should_run
+        continue-on-error: true
+        name: check latest commit is less than a day
+        if: ${{ github.event_name == 'schedule' }}
+        run: test -z $(git rev-list  --after="7 days"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+
   build:
     strategy:
       matrix:
@@ -16,20 +32,19 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Cache Key
       id: cache_key
-      run: echo ::set-output name=key::$(stack $RESOLVER ls dependencies | md5sum | awk '{print $1}')
+      run: echo "key=$(stack $RESOLVER ls dependencies | md5sum | awk '{print $1}')" >> $GITHUB_ENV
       env:
         RESOLVER: ${{ matrix.plan.resolver }}
 
     - name: Cache Dependencies
-      id: cache
-      uses: actions/cache@v1
+      uses: actions/cache@v3
       with:
         path: ~/.stack
-        key: ${{ matrix.os }}-${{ matrix.plan.resolver }}-${{ steps.cache_key.outputs.key }}
+        key: ${{ matrix.os }}-${{ matrix.plan.resolver }}-${{ env.key }}
 
     - name: Build Snapshot
       if: steps.cache.outputs.cache-hit != 'true'
@@ -43,3 +58,31 @@ jobs:
         stack $RESOLVER --no-terminal test --bench --no-run-benchmarks
       env:
         RESOLVER: ${{ matrix.plan.resolver }}
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: check_date
+    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        platforms: linux/amd64,linux/arm64
+        tags: ${{ secrets.DOCKER_USERNAME }}/tesladb:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/tesladb:cache
+        cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/tesladb:cache,mode=max    
