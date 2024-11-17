@@ -41,7 +41,12 @@ jobs:
       id: setup
       with:
         ghc-version: '9.6'
-        cabal-version: 'latest'
+        cabal-version: '3.10'
+        cabal-update: true
+
+    - name: Setup haskell deps and tools
+      run: |
+        cabal install tasty-discover
 
     - name: Generate Cache Keys
       id: cache_key
@@ -62,10 +67,6 @@ jobs:
           ubuntu-latest-ghc-${{ env.ghc_ver }}-cabal-
           ubuntu-latest-ghc-${{ env.ghc_ver }}-
           ubuntu-latest-
-
-    - name: Install tasty-discover
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: cabal install --overwrite-policy=always tasty-discover
 
     - name: Build & Test
       run: |
