@@ -22,7 +22,7 @@ RUN cabal install
 # Stage 2: Create the final image
 FROM debian:bullseye-slim
 
-RUN apt-get update && apt-get install -y libpq5 zlib1g
+RUN apt-get update && apt-get install -y libpq5 zlib1g ca-certificates
 
 WORKDIR /usr/local/bin
 
