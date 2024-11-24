@@ -21,7 +21,7 @@ makeEffect ''MQTTFX
 runMQTT :: (IOE :> es) => MQTTClient -> Eff (MQTTFX : es) a -> Eff es a
 runMQTT mc = interpret \case
     PublishMQTT topic 0 payload props -> liftIO $ publishq mc topic payload False QoS2 props
-    PublishMQTT topic secs payload props -> liftIO $ publishq mc topic payload False QoS2 (
+    PublishMQTT topic secs payload props -> liftIO $ publishq mc topic payload True QoS2 (
         PropMessageExpiryInterval secs : props)
     AtomicMQTT f -> pure (f mc)
 
