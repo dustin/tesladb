@@ -40,7 +40,8 @@ packages:
 extra-deps:
 - tesla-0.7.5.0
 - net-mqtt-rpc-0.2.0.1@sha256:3ea17728105b0bb82d0f210473530c6cb4290dab518041b91dfd8192946e3a88,1757
-
+- cleff-0.3.3.0@sha256:04f4a3eb5d580055b7645ce4e770baae259e24a520f4144733b6b5e24c0263ec,6498
+- net-mqtt-0.8.6.2@sha256:f882037dc6a658d0235de0bdc4c24c89194010da01eddba765dd427c9d9069a0,4499
 # Override default flag values for local packages and extra-deps
 # flags: {}
 
