@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.35.2.
+-- This file has been generated from package.yaml by hpack version 0.37.0.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 8ce3d0951c30a7b8326d798d7015657e48dc2cb243b3ccdf61a8773f9f4c0676
+-- hash: 12eeb66a3ed5b8360bfef1beb0b1d407f8398943bbfe99fa62c6440a1c23ad4c
 
 name:           tesladb
 version:        0.3.0.0
@@ -71,9 +71,9 @@ library
     , containers
     , exceptions
     , generic-deriving
-    , hasql
-    , hasql-th
-    , hasql-transaction
+    , hasql <1.9
+    , hasql-th <1.9
+    , hasql-transaction <1.9
     , http-client
     , lens
     , lens-aeson
@@ -130,9 +130,9 @@ executable teslacatcher
     , containers
     , exceptions
     , generic-deriving
-    , hasql
-    , hasql-th
-    , hasql-transaction
+    , hasql <1.9
+    , hasql-th <1.9
+    , hasql-transaction <1.9
     , http-client
     , lens
     , lens-aeson
@@ -191,9 +191,9 @@ executable tesladb
     , containers
     , exceptions
     , generic-deriving
-    , hasql
-    , hasql-th
-    , hasql-transaction
+    , hasql <1.9
+    , hasql-th <1.9
+    , hasql-transaction <1.9
     , http-client
     , lens
     , lens-aeson
@@ -251,9 +251,9 @@ executable teslauth
     , containers
     , exceptions
     , generic-deriving
-    , hasql
-    , hasql-th
-    , hasql-transaction
+    , hasql <1.9
+    , hasql-th <1.9
+    , hasql-transaction <1.9
     , http-client
     , lens
     , lens-aeson
