@@ -1,5 +1,5 @@
 # Stage 1: Build the Haskell project
-FROM haskell:9.6-bullseye AS builder
+FROM haskell:9.10-bullseye AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
