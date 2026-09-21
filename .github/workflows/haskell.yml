@@ -23,12 +23,6 @@ jobs:
             ghc-version: '9.6'
             cabal-version: '3.10'
             use-ghcup-cache: true
-          # Option A: use the GHC/Cabal versions pre-installed on the runner image,
-          # so setup should skip installation entirely.
-          - variant: preinstalled
-            ghc-version: '9.14'
-            cabal-version: '3.18'
-            use-ghcup-cache: false
     name: cabal (${{ matrix.variant }})
     steps:
     - uses: actions/checkout@v6
