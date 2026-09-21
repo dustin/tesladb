@@ -8,3 +8,4 @@ stack.yaml.lock
 TAGS
 tesladb.eventlog
 test.db
+ghcid.out
