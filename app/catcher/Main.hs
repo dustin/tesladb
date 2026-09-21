@@ -66,7 +66,7 @@ options = Options
 type Callback m = MQTTClient -> Topic -> BL.ByteString -> [Property] -> m ()
 
 withMQTT :: (IOE :> es, LogFX :> es) => Options -> Callback (Eff es) -> (MQTTClient -> Eff es ()) -> Eff es ()
-withMQTT Options{..} cb a = withUnliftStrategy (ConcUnlift Persistent Unlimited) $ bracket conn (liftIO . normalDisconnect) a
+withMQTT Options{..} cb a = bracket conn (liftIO . normalDisconnect) a
   where
     conn = withRunInIO $ \unl -> do
       mc <- connectURI mqttConfig{_cleanSession=optSessionTime == 0,
@@ -151,7 +151,7 @@ storeThings opts@Options{..} =
 
 run :: Options -> IO ()
 run opts@Options{optDBPath, optVerbose} =
-  runEff . runFailIO . runLogFX optVerbose . withDB optDBPath $ do
+  runEff . withUnliftStrategy (ConcUnlift Persistent Unlimited) . runFailIO . runLogFX optVerbose . withDB optDBPath $ do
     initDB
     storeThings opts
 

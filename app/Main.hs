@@ -70,7 +70,7 @@ dbSink = forever (runAtomicSink readTChan) >>= \case
             _       -> pure ()
 
 mqttSink :: forall es. (IOE :> es, LogFX :> es, CarFX :> es, DB :> es, Sink :> es) => Eff es ()
-mqttSink = withUnliftStrategy (ConcUnlift Persistent Unlimited) $ do
+mqttSink = do
   opts <- sinkOption opts
   rug <- sinkOption loopRug
   withMQTT opts rug (store opts)
@@ -291,7 +291,7 @@ run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
   p <- newTVarIO CheckAwake
   rug <- newTVarIO False
-  runEff . withDB optDBPath $ do
+  runEff . withUnliftStrategy (ConcUnlift Persistent Unlimited) . withDB optDBPath $ do
     initDB
     vid <- withRunInIO $ \unl -> runNamedCar optVName (unl loadAuthInfo) currentVehicleID
     runLogFX optVerbose . runCarFX vid $ do
