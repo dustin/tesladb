@@ -37,6 +37,7 @@ import           Tesla.Car                  (VehicleData, currentVehicleID,
                                              isCharging, isUserPresent,
                                              locationData, openDoors,
                                              runNamedCar, vdata, vehicleData)
+import           Tesla.Car.Command          (mkPercent)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.DB
 import           Tesla.RunDB
@@ -170,7 +171,7 @@ mqttSink = do
         call "cmd/charging/start" res _ = callCMD res CMD.startCharging
         call "cmd/charging/stop" res _ = callCMD res CMD.stopCharging
         call "cmd/charging/limit" res x = callCMD res $ CMD.setLimit d
-          where d = fromMaybe (fromJust $ read "80") (readMaybe . BC.unpack $ x)
+          where d = fromMaybe (fromJust $ mkPercent @Int 80) (readMaybe . BC.unpack $ x)
 
         call "cmd/hvac/on" res _ = callCMD res CMD.hvacOn
         call "cmd/hvac/off" res _ = callCMD res CMD.hvacOff
