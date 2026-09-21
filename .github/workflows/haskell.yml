@@ -9,37 +9,21 @@ on:
 jobs:
   cabal:
     runs-on: 'ubuntu-latest'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Current setup: pinned GHC/Cabal, ghcup install every run, no ghcup cache.
-          - variant: current
-            ghc-version: '9.6'
-            cabal-version: '3.10'
-            use-ghcup-cache: false
-          # Option B: same pinned GHC/Cabal, but with the ghcup toolchain cached.
-          - variant: cached
-            ghc-version: '9.6'
-            cabal-version: '3.10'
-            use-ghcup-cache: true
-    name: cabal (${{ matrix.variant }})
     steps:
     - uses: actions/checkout@v6
 
     - name: Cache GHCup toolchain
-      if: matrix.use-ghcup-cache
       uses: actions/cache@v5
       with:
         path: ~/.ghcup
-        key: ghcup-${{ runner.os }}-ghc${{ matrix.ghc-version }}-cabal${{ matrix.cabal-version }}-v1
+        key: ghcup-${{ runner.os }}-ghc9.6-cabal3.10-v1
 
     - name: Set up Haskell
       uses: haskell-actions/setup@v2
       id: setup
       with:
-        ghc-version: ${{ matrix.ghc-version }}
-        cabal-version: ${{ matrix.cabal-version }}
+        ghc-version: '9.6'
+        cabal-version: '3.10'
         cabal-update: true
 
     - name: Setup haskell deps and tools
@@ -60,7 +44,7 @@ jobs:
         path: |
           ~/.cabal
           dist-newstyle
-        key: ubuntu-latest-${{ matrix.variant }}-ghc-${{ env.ghc_ver }}-cabal-${{ env.dep_hash }}
+        key: ubuntu-latest-ghc-${{ env.ghc_ver }}-cabal-${{ env.dep_hash }}
 
     - name: Build & Test
       run: |
@@ -71,5 +55,5 @@ jobs:
     - name: Store Artifact
       uses: actions/upload-artifact@v7
       with:
-        name: tesladb-ubuntu-latest-${{ matrix.variant }}
+        name: tesladb-ubuntu-latest
         path: dist
