@@ -1,5 +1,5 @@
 # Stage 1: Build the Haskell project
-FROM haskell:9.10-bullseye AS builder
+FROM haskell:9.10-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -20,7 +20,7 @@ COPY . ./
 RUN cabal install
 
 # Stage 2: Create the final image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y libpq5 zlib1g ca-certificates
 
