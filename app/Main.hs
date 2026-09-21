@@ -78,14 +78,18 @@ mqttSink = do
     connect :: Options -> TVar Bool -> Eff es MQTTClient
     connect opts@Options{..} rug = do
       logInfoL ["Connecting to ", tshow optMQTTURI]
-      withRunInIO $ \unl -> do
-        mc <- liftIO $ connectURI mqttConfig{_protocol=Protocol50,
-                                             _msgCB=SimpleCallback (\mc t b props -> unl $ runMQTT mc $ tdbAPI opts rug t b props)} optMQTTURI
-        props <- svrProps mc
-        unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
-        subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
-        unl $ logInfoL ["MQTT sub response: ", tshow subr]
-        pure mc
+      mc <- withRunInIO $ \unl ->
+        liftIO $ connectURI mqttConfig{_protocol=Protocol50,
+                                       _msgCB=SimpleCallback (\mc t b props -> unl $ runMQTT mc $ tdbAPI opts rug t b props)} optMQTTURI
+      setup mc `catch` \(e :: SomeException) -> disco opts mc >> throwM e
+      pure mc
+
+      where
+        setup mc = withRunInIO $ \unl -> do
+          props <- svrProps mc
+          unl $ logInfoL ["MQTT conn props from ", tshow optMQTTURI, ": ", tshow props]
+          subr <- subscribe mc [(optInTopic, subOptions{_subQoS=QoS2})] mempty
+          unl $ logInfoL ["MQTT sub response: ", tshow subr]
 
     disco Options{optMQTTURI} c = do
       logErrorL ["disconnecting from ", tshow optMQTTURI]
