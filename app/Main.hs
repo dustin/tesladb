@@ -280,7 +280,7 @@ run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
     runLogFX optVerbose . runCarFX vid $ do
       let st = State opts p rug
       runSinks st gather ([dbSink, watchdogSink (3600 * 12)]
-                                      <> [excLoop "mqtt" mqttSink | not optNoMQTT])
+                                      <> [excLoop "mqtt" 12 mqttSink | not optNoMQTT])
 
 main :: IO ()
 main = run =<< execParser opts

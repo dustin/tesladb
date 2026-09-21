@@ -10,6 +10,7 @@ import           Control.Monad.Catch      (Exception, Handler (..), SomeExceptio
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Functor             (($>))
 import           Data.Text                (Text)
+import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
 import           UnliftIO.Async           (async, race_, waitAnyCancel)
 import           UnliftIO.Timeout         (timeout)
@@ -35,17 +36,29 @@ textToBL = BL.fromStrict . TE.encodeUtf8
 die :: String -> IO ()
 die = throwM . Die
 
-excLoop :: forall es. [IOE, LogFX, Sink] :>> es => Text -> Eff es () -> Eff es ()
-excLoop n s = forever $ catches s [Handler cancelHandler, Handler otherHandler]
+-- | Run the given action repeatedly, retrying on exception, but die after maxFailures consecutive failures.
+excLoop :: forall es. [IOE, LogFX, Sink] :>> es => Text -> Int -> Eff es () -> Eff es ()
+excLoop n maxFailures s = go 0
 
   where
+    go :: Int -> Eff es ()
+    go failures = catches (s >> go 0) [Handler cancelHandler, Handler (otherHandler failures)]
+
     cancelHandler :: AsyncCancelled -> Eff es ()
     cancelHandler e = logError "AsyncCanceled from mqtt handler" >> throwM e
 
-    otherHandler :: SomeException -> Eff es ()
-    otherHandler e = do
-      logErrorL ["Caught exception in handler: ", n, " - ", tshow e, " retrying shortly"]
-      sleep 5
+    otherHandler :: Int -> SomeException -> Eff es ()
+    otherHandler failures e
+      | failures' >= maxFailures = do
+          logErrorL ["Caught exception in handler: ", n, " - ", tshow e,
+                     " giving up after ", tshow failures', " consecutive failures"]
+          liftIO $ die (T.unpack n <> ": giving up after " <> show failures' <> " consecutive failures: " <> show e)
+      | otherwise = do
+          logErrorL ["Caught exception in handler: ", n, " - ", tshow e,
+                     " retrying shortly (failure ", tshow failures', " of ", tshow maxFailures, ")"]
+          sleep 5
+          go failures'
+      where failures' = failures + 1
 
 sleep :: MonadIO m => Int -> m ()
 sleep = liftIO . threadDelay . seconds
