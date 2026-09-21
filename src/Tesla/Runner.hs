@@ -46,7 +46,7 @@ excLoop n maxFailures s = go 0
 
   where
     go :: Int -> Eff es ()
-    go failures = catches (s >> go 0) [Handler cancelHandler, Handler (otherHandler failures)]
+    go failures = catches (s *> go 0) [Handler cancelHandler, Handler (otherHandler failures)]
 
     cancelHandler :: AsyncCancelled -> Eff es ()
     cancelHandler e = logError "AsyncCanceled from mqtt handler" >> throwM e
