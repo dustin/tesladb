@@ -1,10 +1,7 @@
 module Main where
 
-import           Cleff
-import           Cleff.Fail
-import           Cleff.Mask
 import           Control.Monad              (unless, (<=<))
-import           Control.Monad.Catch        (SomeException (..), catch)
+import           Control.Monad.Catch        (SomeException (..), bracket, catch)
 import           Data.Aeson                 (decode, encode)
 import qualified Data.ByteString.Lazy       as BL
 import qualified Data.ByteString.Lazy.Char8 as BC
@@ -20,13 +17,19 @@ import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
 import           Data.Time.LocalTime        (getCurrentTimeZone, utcToLocalTime)
 import           Data.Word                  (Word32)
+import           Effectful                  (Eff, IOE, liftIO, runEff,
+                                             withRunInIO, (:>))
+import           Effectful.Fail             (Fail, runFailIO)
 import           Network.MQTT.Client
 import qualified Network.MQTT.RPC           as MQTTRPC
 import           Network.MQTT.Topic
 import           Network.MQTT.Types         (RetainHandling (..))
 import           Network.URI
-import           Options.Applicative        (Parser, auto, execParser, fullDesc, help, helper, info, long, maybeReader,
-                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
+import           Options.Applicative        (Parser, auto, execParser, fullDesc,
+                                             help, helper, info, long,
+                                             maybeReader, option, progDesc,
+                                             short, showDefault, strOption,
+                                             switch, value, (<**>))
 import           UnliftIO.Async             (concurrently, mapConcurrently_)
 
 import           Tesla.Car
@@ -59,7 +62,7 @@ options = Options
 
 type Callback m = MQTTClient -> Topic -> BL.ByteString -> [Property] -> m ()
 
-withMQTT :: [IOE, LogFX, Mask] :>> es => Options -> Callback (Eff es) -> (MQTTClient -> Eff es ()) -> Eff es ()
+withMQTT :: (IOE :> es, LogFX :> es) => Options -> Callback (Eff es) -> (MQTTClient -> Eff es ()) -> Eff es ()
 withMQTT Options{..} cb = bracket conn (liftIO . normalDisconnect)
   where
     conn = withRunInIO $ \unl -> do
@@ -84,10 +87,10 @@ logData vd = unless (up || null od) $ logInfoL [
     od = openDoors vd
     ts = teslaTS vd
 
-tryInsert :: [IOE, Mask, LogFX, DB] :>> es => VehicleData -> Eff es ()
+tryInsert :: (IOE :> es, LogFX :> es, DB :> es) => VehicleData -> Eff es ()
 tryInsert vd = catch (insertVData vd) (\(e :: SomeException) -> logErrorL ["Error on ", tshow . maybeTeslaTS $ vd, ": ", tshow e])
 
-backfill :: forall es. [IOE, Mask, Fail, DB, LogFX] :>> es => MQTTClient -> Filter -> Eff es ()
+backfill :: forall es. (IOE :> es, Fail :> es, DB :> es, LogFX :> es) => MQTTClient -> Filter -> Eff es ()
 backfill mc dfilter = do
   logInfo "Beginning backfill"
   (Just rdays, ldays) <- concurrently remoteDays (Map.fromList <$> listDays)
@@ -124,7 +127,7 @@ backfill mc dfilter = do
 
           where inner = BL.stripPrefix "\"" <=< BL.stripSuffix "\""
 
-storeThings :: [IOE, Mask, Fail, LogFX, Fail, DB] :>> es => Options -> Eff es ()
+storeThings :: (IOE :> es, Fail :> es, LogFX :> es, DB :> es) => Options -> Eff es ()
 storeThings opts@Options{..} =
   withMQTT opts sink $ \mc -> do
     subr <- liftIO $ subscribe mc [(optMQTTTopic, subOptions{_subQoS=QoS2,
@@ -145,7 +148,7 @@ storeThings opts@Options{..} =
 
 run :: Options -> IO ()
 run opts@Options{optDBPath, optVerbose} =
-  runIOE . runFailIO . runMask . runLogFX optVerbose . withDB optDBPath $ do
+  runEff . runFailIO . runLogFX optVerbose . withDB optDBPath $ do
     initDB
     storeThings opts
 

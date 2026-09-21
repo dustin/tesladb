@@ -1,7 +1,7 @@
 module Tesla.RunDB (withDB) where
 
-import           Cleff
 import           Data.List         (isPrefixOf)
+import           Effectful         (Eff, IOE, (:>))
 import           Tesla.DB
 import qualified Tesla.DB.Postgres as Postgres
 import qualified Tesla.DB.SQLite   as SQLite

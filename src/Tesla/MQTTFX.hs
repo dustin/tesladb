@@ -2,11 +2,15 @@
 
 module Tesla.MQTTFX where
 
-import           Cleff
-import           Control.Concurrent.STM (STM)
-import           Data.ByteString.Lazy   (ByteString)
-import           Data.Word              (Word32)
-import           Network.MQTT.Client    (MQTTClient, Property (..), QoS (..), Topic, publishq)
+import           Control.Concurrent.STM     (STM)
+import           Data.ByteString.Lazy       (ByteString)
+import           Data.Word                  (Word32)
+import           Effectful                  (Dispatch (Dynamic), DispatchOf,
+                                             Eff, Effect, IOE, liftIO, (:>))
+import           Effectful.Dispatch.Dynamic (interpret_)
+import           Effectful.TH               (makeEffect)
+import           Network.MQTT.Client        (MQTTClient, Property (..),
+                                             QoS (..), Topic, publishq)
 
 type Seconds = Word32
 
@@ -16,10 +20,12 @@ data MQTTFX :: Effect where
     -- | We have a case where we need to mix some STM with MQTT client STM ops.
     AtomicMQTT :: (MQTTClient -> STM a) -> MQTTFX m (STM a)
 
+type instance DispatchOf MQTTFX = Dynamic
+
 makeEffect ''MQTTFX
 
 runMQTT :: (IOE :> es) => MQTTClient -> Eff (MQTTFX : es) a -> Eff es a
-runMQTT mc = interpret \case
+runMQTT mc = interpret_ \case
     PublishMQTT topic 0 payload props -> liftIO $ publishq mc topic payload False QoS2 props
     PublishMQTT topic secs payload props -> liftIO $ publishq mc topic payload True QoS2 (
         PropMessageExpiryInterval secs : props)

@@ -47,7 +47,8 @@ dependencies:
 - vector
 - exceptions
 - monad-logger
-- cleff
+- effectful-core
+- effectful-th
 - tesla >= 0.7.5.0
 
 default-extensions:
@@ -57,6 +58,7 @@ default-extensions:
   - UndecidableInstances
   - GADTs
   - KindSignatures
+  - TypeFamilies
   - LambdaCase
   - BlockArguments
   - TypeOperators

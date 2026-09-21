@@ -1,10 +1,10 @@
 module Main where
 
-import           Cleff
-import           Cleff.Mask                 (Mask (..), bracket, runMask)
 import           Control.Lens
 import           Control.Monad              (forever, unless)
-import           Control.Monad.Catch        (MonadCatch (..), SomeException (..), catch, throwM, try)
+import           Control.Monad.Catch        (MonadCatch (..),
+                                             SomeException (..), bracket, catch,
+                                             throwM, try)
 import           Data.Aeson                 (Value, decode, encode)
 import           Data.Aeson.Lens
 import           Data.Bifunctor             (first)
@@ -15,19 +15,28 @@ import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, mapMaybe)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
+import           Effectful                  (Eff, IOE, liftIO, runEff,
+                                             withRunInIO, (:>))
 import           Network.MQTT.Client
 import           Network.MQTT.Topic
 import           Network.URI
-import           Options.Applicative        (Parser, execParser, fullDesc, help, helper, info, long, maybeReader,
-                                             option, progDesc, short, showDefault, strOption, switch, value, (<**>))
+import           Options.Applicative        (Parser, execParser, fullDesc, help,
+                                             helper, info, long, maybeReader,
+                                             option, progDesc, short,
+                                             showDefault, strOption, switch,
+                                             value, (<**>))
 import           Text.Read                  (readMaybe)
-import           UnliftIO                   (TChan, TVar, atomically, mapConcurrently_, newTVarIO, readTChan,
-                                             readTVarIO, writeTChan, writeTVar)
+import           UnliftIO                   (TChan, TVar, atomically,
+                                             mapConcurrently_, newTVarIO,
+                                             readTChan, readTVarIO, writeTChan,
+                                             writeTVar)
 import           UnliftIO.Timeout           (timeout)
 
 import           Tesla
-import           Tesla.Car                  (VehicleData, currentVehicleID, isCharging, isUserPresent, locationData,
-                                             openDoors, runNamedCar, vdata, vehicleData)
+import           Tesla.Car                  (VehicleData, currentVehicleID,
+                                             isCharging, isUserPresent,
+                                             locationData, openDoors,
+                                             runNamedCar, vdata, vehicleData)
 import qualified Tesla.Car.Commands         as CMD
 import           Tesla.DB
 import           Tesla.RunDB
@@ -51,12 +60,12 @@ options = Options
   <*> switch (long "enable-commands" <> help "enable remote commands")
   <*> strOption (long "product-topic" <> showDefault <> value "tmp/tesla/products" <> help "Raw product topic")
 
-dbSink :: [IOE, DB, Sink] :>> es => Eff es ()
+dbSink :: (IOE :> es, DB :> es, Sink :> es) => Eff es ()
 dbSink = forever (runAtomicSink readTChan) >>= \case
             VData v -> insertVData v
             _       -> pure ()
 
-mqttSink :: forall es. [IOE, Mask, LogFX, CarFX, DB, Sink] :>> es => Eff es ()
+mqttSink :: forall es. (IOE :> es, LogFX :> es, CarFX :> es, DB :> es, Sink :> es) => Eff es ()
 mqttSink = do
   opts <- sinkOption opts
   rug <- sinkOption loopRug
@@ -223,7 +232,7 @@ checkAsleep' :: IOE :> es => TVar PrereqAction -> VehicleState -> Eff es (Either
 checkAsleep' _ VOnline = pure $ Left "not asleep"
 checkAsleep' p _       = atomically $ writeTVar p CheckAwake $> Left "transitioned to checkAwake"
 
-gather :: [IOE, CarFX, DB, LogFX] :>> es => State -> TChan Observation -> Eff es ()
+gather :: (IOE :> es, CarFX :> es, DB :> es, LogFX :> es) => State -> TChan Observation -> Eff es ()
 gather (State _opts pv loopRug) ch = do
     vid <- currentVehicle
     logInfoL ["Looping with vid: ", vid]
@@ -274,7 +283,7 @@ run :: Options -> IO ()
 run opts@Options{optNoMQTT, optVerbose, optVName, optDBPath} = do
   p <- newTVarIO CheckAwake
   rug <- newTVarIO False
-  runIOE . runMask . withDB optDBPath $ do
+  runEff . withDB optDBPath $ do
     initDB
     vid <- withRunInIO $ \unl -> runNamedCar optVName (unl loadAuthInfo) currentVehicleID
     runLogFX optVerbose . runCarFX vid $ do

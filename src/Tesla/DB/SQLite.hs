@@ -2,20 +2,21 @@
 
 module Tesla.DB.SQLite (runConn, runStr) where
 
-import           Cleff
-import           Control.Exception      (Exception (..), throwIO)
-import           Data.Time.Clock        (UTCTime)
-import           Database.SQLite.Simple hiding (bind, close)
-import           Tesla.Auth             (AuthResponse (..))
+import           Control.Exception          (Exception (..), throwIO)
+import           Data.Time.Clock            (UTCTime)
+import           Database.SQLite.Simple     hiding (bind, close)
+import           Effectful                  (Eff, IOE, MonadIO, liftIO, (:>))
+import           Effectful.Dispatch.Dynamic (interpret_)
+import           Tesla.Auth                 (AuthResponse (..))
 
-import           Tesla.Car              (VehicleData, teslaTS)
+import           Tesla.Car                  (VehicleData, teslaTS)
 import           Tesla.DB
 
 runStr :: IOE :> es => String -> Eff (DB : es) a -> Eff es a
 runStr str f = liftIO (open str) >>= flip runConn f
 
 runConn :: (IOE :> es) => Connection -> Eff (DB : es) a -> Eff es a
-runConn db = interpret \case
+runConn db = interpret_ \case
   InitDB            -> liftIO $ sdbInit db
   InsertVData vdata -> liftIO $ sinsertVData db vdata
   ListDays          -> liftIO $ slistDays db

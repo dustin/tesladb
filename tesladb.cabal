@@ -1,10 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.37.0.
+-- This file has been generated from package.yaml by hpack version 0.38.3.
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 26b04d02ef6318fd2f4d290a9b58eb6432ca29e29cb0cdda6cfd8bca8976c653
+-- hash: 7ef14f711b910589e0fd9384aa94ccb181de22b30cd8b0964a9d170d33e58084
 
 name:           tesladb
 version:        0.3.0.0
@@ -48,6 +48,7 @@ library
       UndecidableInstances
       GADTs
       KindSignatures
+      TypeFamilies
       LambdaCase
       BlockArguments
       TypeOperators
@@ -67,8 +68,9 @@ library
     , async
     , base >=4.7 && <5
     , bytestring
-    , cleff
     , containers
+    , effectful-core
+    , effectful-th
     , exceptions
     , generic-deriving
     , hasql <1.9
@@ -107,6 +109,7 @@ executable teslacatcher
       UndecidableInstances
       GADTs
       KindSignatures
+      TypeFamilies
       LambdaCase
       BlockArguments
       TypeOperators
@@ -126,8 +129,9 @@ executable teslacatcher
     , async
     , base >=4.7 && <5
     , bytestring
-    , cleff
     , containers
+    , effectful-core
+    , effectful-th
     , exceptions
     , generic-deriving
     , hasql <1.9
@@ -168,6 +172,7 @@ executable tesladb
       UndecidableInstances
       GADTs
       KindSignatures
+      TypeFamilies
       LambdaCase
       BlockArguments
       TypeOperators
@@ -187,8 +192,9 @@ executable tesladb
     , async
     , base >=4.7 && <5
     , bytestring
-    , cleff
     , containers
+    , effectful-core
+    , effectful-th
     , exceptions
     , generic-deriving
     , hasql <1.9
@@ -228,6 +234,7 @@ executable teslauth
       UndecidableInstances
       GADTs
       KindSignatures
+      TypeFamilies
       LambdaCase
       BlockArguments
       TypeOperators
@@ -247,8 +254,9 @@ executable teslauth
     , async
     , base >=4.7 && <5
     , bytestring
-    , cleff
     , containers
+    , effectful-core
+    , effectful-th
     , exceptions
     , generic-deriving
     , hasql <1.9

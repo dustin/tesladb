@@ -3,7 +3,6 @@
 
 module Tesla.DB.Postgres (runStr, runConn) where
 
-import           Cleff
 import           Control.Exception          (throwIO)
 import qualified Data.Aeson                 as J
 import           Data.ByteString.Char8      (pack)
@@ -19,6 +18,8 @@ import qualified Hasql.Transaction          as TX
 import           Hasql.Transaction.Sessions (transaction)
 import qualified Hasql.Transaction.Sessions as TX
 
+import           Effectful                  (Eff, IOE, liftIO, (:>))
+import           Effectful.Dispatch.Dynamic (interpret_)
 import           Tesla.Auth                 (AuthResponse (..))
 import           Tesla.Car                  (VehicleData, teslaTS)
 import           Tesla.DB
@@ -27,7 +28,7 @@ runStr :: IOE :> es => String -> Eff (DB : es) a -> Eff es a
 runStr s f = liftIO (acquire (pack s)) >>= either (error . show) (flip runConn f)
 
 runConn :: forall es a. (IOE :> es) => Connection -> Eff (DB : es) a -> Eff es a
-runConn db = interpret \case
+runConn db = interpret_ \case
   InitDB            -> rundb pdbInit
   InsertVData vdata -> rundb $ pinsertVData vdata
   ListDays          -> rundb plistDays

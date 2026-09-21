@@ -1,8 +1,10 @@
 module Main where
 
-import           Cleff
-import           Options.Applicative (Parser, execParser, fullDesc, help, helper, info, long, progDesc, short,
-                                      showDefault, strOption, switch, value, (<**>))
+import           Effectful           (Eff, IOE, liftIO, runEff, (:>))
+import           Options.Applicative (Parser, execParser, fullDesc, help,
+                                      helper, info, long, progDesc, short,
+                                      showDefault, strOption, switch, value,
+                                      (<**>))
 import           System.IO           (hFlush, stdout)
 
 import           Tesla
@@ -22,14 +24,14 @@ options = Options
 getToken :: IO String
 getToken = putStr "Paste in a refresh token: " *> hFlush stdout *> getLine
 
-dispatch :: [IOE, DB] :>> es => Options -> Eff es ()
+dispatch :: (IOE :> es, DB :> es) => Options -> Eff es ()
 dispatch Options{optRefresh}
   | optRefresh = updateAuth =<< liftIO . refreshAuth =<< loadAuth
   | otherwise = updateAuth . AuthResponse "" 0 =<< liftIO getToken
 
 run :: Options -> IO ()
 run opts@Options{optDBPath} =
-  runIOE . withDB optDBPath $ do
+  runEff . withDB optDBPath $ do
     initDB
     dispatch opts
 
