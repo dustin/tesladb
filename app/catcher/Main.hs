@@ -17,8 +17,11 @@ import           Data.Time.Clock            (UTCTime)
 import           Data.Time.Format           (defaultTimeLocale, formatTime)
 import           Data.Time.LocalTime        (getCurrentTimeZone, utcToLocalTime)
 import           Data.Word                  (Word32)
-import           Effectful                  (Eff, IOE, liftIO, runEff,
-                                             withRunInIO, (:>))
+import           Effectful                  (Eff, IOE, Limit (..),
+                                             Persistence (..),
+                                             UnliftStrategy (..), liftIO,
+                                             runEff, withRunInIO,
+                                             withUnliftStrategy, (:>))
 import           Effectful.Fail             (Fail, runFailIO)
 import           Network.MQTT.Client
 import qualified Network.MQTT.RPC           as MQTTRPC
@@ -63,7 +66,7 @@ options = Options
 type Callback m = MQTTClient -> Topic -> BL.ByteString -> [Property] -> m ()
 
 withMQTT :: (IOE :> es, LogFX :> es) => Options -> Callback (Eff es) -> (MQTTClient -> Eff es ()) -> Eff es ()
-withMQTT Options{..} cb = bracket conn (liftIO . normalDisconnect)
+withMQTT Options{..} cb a = withUnliftStrategy (ConcUnlift Persistent Unlimited) $ bracket conn (liftIO . normalDisconnect) a
   where
     conn = withRunInIO $ \unl -> do
       mc <- connectURI mqttConfig{_cleanSession=optSessionTime == 0,

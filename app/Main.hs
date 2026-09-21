@@ -15,8 +15,11 @@ import qualified Data.Map.Strict            as Map
 import           Data.Maybe                 (fromJust, fromMaybe, mapMaybe)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
-import           Effectful                  (Eff, IOE, liftIO, runEff,
-                                             withRunInIO, (:>))
+import           Effectful                  (Eff, IOE, Limit (..),
+                                             Persistence (..),
+                                             UnliftStrategy (..), liftIO,
+                                             runEff, withRunInIO,
+                                             withUnliftStrategy, (:>))
 import           Network.MQTT.Client
 import           Network.MQTT.Topic
 import           Network.URI
@@ -67,7 +70,7 @@ dbSink = forever (runAtomicSink readTChan) >>= \case
             _       -> pure ()
 
 mqttSink :: forall es. (IOE :> es, LogFX :> es, CarFX :> es, DB :> es, Sink :> es) => Eff es ()
-mqttSink = do
+mqttSink = withUnliftStrategy (ConcUnlift Persistent Unlimited) $ do
   opts <- sinkOption opts
   rug <- sinkOption loopRug
   withMQTT opts rug (store opts)
