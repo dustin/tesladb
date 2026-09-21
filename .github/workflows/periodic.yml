@@ -64,6 +64,10 @@ jobs:
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
 
+    permissions:
+      contents: read
+      packages: write
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v6
@@ -77,12 +81,21 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v7
       with:
         context: .
         push: true
         platforms: linux/amd64,linux/arm64
-        tags: ${{ secrets.DOCKER_USERNAME }}/tesladb:latest
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/tesladb:latest
+          ghcr.io/${{ github.repository_owner }}/tesladb:latest
         cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/tesladb:cache
-        cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/tesladb:cache,mode=max    
+        cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/tesladb:cache,mode=max
