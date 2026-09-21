@@ -10,7 +10,7 @@ jobs:
   cabal:
     runs-on: 'ubuntu-latest'
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
 
     - name: Cache GHCup toolchain
       uses: actions/cache@v5
