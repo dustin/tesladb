@@ -9,9 +9,10 @@ Grafana or the like.
 
 ## Building
 
-This is a [Haskell stack tools](https://docs.haskellstack.org/) based
-project.  Given a working `stack`, one should be able to execute
-`stack build` which will fetch all of the dependencies and build.
+This is a [Haskell cabal](https://www.haskell.org/cabal/) based
+project.  A `nix develop` (or `nix-shell`) invocation will drop you
+into a shell with the needed toolchain (GHC, `cabal-install`, `hpack`,
+etc.), and `cabal build` will fetch all of the dependencies and build.
 
 After building, you will have several executables.
 
@@ -32,9 +33,10 @@ named "rejects" in the database.
 
 ## Setup and Run
 
-With Haskell `stack`, you can run the binaries from the source
-checkout using `stack exec`.  Alternatively use `stack install` to
-install to Stack's local bin directory.  Examples below are post install.
+With `cabal`, you can run the binaries from the source checkout
+using `cabal run <exe-name> --`.  Alternatively use `cabal install`
+to install them to `~/.local/bin` (or `~/.cabal/bin`, depending on
+your configuration).  Examples below are post install.
 
 The first thing you'll need to do is auth.  This runs once initially,
 then needs to be run once a day with the -r flag to refresh.

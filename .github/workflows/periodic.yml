@@ -26,38 +26,38 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        plan:
-        # - { resolver: "--resolver=nightly" }
-        - { resolver: "--resolver=lts" }
 
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v6
 
-    - name: Cache Key
+    - name: Set up Haskell
+      uses: haskell-actions/setup@v2
+      id: setup
+      with:
+        ghc-version: '9.6'
+        cabal-version: '3.10'
+        cabal-update: true
+
+    - name: Generate Cache Keys
       id: cache_key
-      run: echo "key=$(stack $RESOLVER ls dependencies | md5sum | awk '{print $1}')" >> $GITHUB_ENV
-      env:
-        RESOLVER: ${{ matrix.plan.resolver }}
+      run: |
+        echo "ghc_ver=${{ steps.setup.outputs.ghc-version }}" >> $GITHUB_ENV
+        cabal freeze
+        echo "dep_hash=$(md5sum cabal.project.freeze | awk '{print $1}')" >> $GITHUB_ENV
 
     - name: Cache Dependencies
       uses: actions/cache@v5
       with:
-        path: ~/.stack
-        key: ${{ matrix.os }}-${{ matrix.plan.resolver }}-${{ env.key }}
-
-    - name: Build Snapshot
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        stack $RESOLVER --no-terminal test --bench --only-snapshot
-      env:
-        RESOLVER: ${{ matrix.plan.resolver }}
+        path: |
+          ~/.cabal
+          dist-newstyle
+        key: ${{ matrix.os }}-ghc-${{ env.ghc_ver }}-cabal-${{ env.dep_hash }}
 
     - name: Build & Test
       run: |
-        stack $RESOLVER --no-terminal test --bench --no-run-benchmarks
-      env:
-        RESOLVER: ${{ matrix.plan.resolver }}
+        cabal build
+        cabal test --test-show-details=streaming
 
   docker:
     runs-on: ubuntu-latest

@@ -2,7 +2,6 @@
 with pkgs;
 mkShell {
   buildInputs = [
-    stack
     cabal-install
     hpack
     haskell.compiler.ghc96
@@ -15,7 +14,8 @@ mkShell {
     haskell-language-server
     haskellPackages.tasty-discover
     zlib
-    postgresql_15
+    postgresql
+    postgresql.pg_config
     gmpxx
     libffi
   ];

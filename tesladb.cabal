@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 12eeb66a3ed5b8360bfef1beb0b1d407f8398943bbfe99fa62c6440a1c23ad4c
+-- hash: 26b04d02ef6318fd2f4d290a9b58eb6432ca29e29cb0cdda6cfd8bca8976c653
 
 name:           tesladb
 version:        0.3.0.0
@@ -181,7 +181,7 @@ executable tesladb
       DeriveGeneric
       DeriveFunctor
       AllowAmbiguousTypes
-  ghc-options: -threaded -rtsopts -eventlog -with-rtsopts=-N -Wall -O2
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N -Wall -O2
   build-depends:
       aeson
     , async

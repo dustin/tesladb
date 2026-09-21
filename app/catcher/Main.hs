@@ -103,7 +103,7 @@ backfill mc dfilter = do
       remoteDay :: BL.ByteString -> Eff es (Maybe (Set UTCTime))
       remoteDay d = decode <$> MQTTRPC.call mc (topic "day") d
 
-      Just tbase = mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
+      tbase = fromJust . mkTopic . dropWhileEnd (== '/') . dropWhileEnd (/= '/') . unFilter $ dfilter
       topic = ((tbase <> "in") <>)
       doDay d = do
         logInfoL ["Backfilling ", pack d]
@@ -116,7 +116,7 @@ backfill mc dfilter = do
         mapConcurrently_ doOne missing
 
       doOne ts = do
-        let (Just k) = (inner . encode) ts
+        let k = fromJust $ (inner . encode) ts
         logDbgL ["Fetching remote data from ", tshow ts]
         vd <- MQTTRPC.call mc (topic "fetch") k
         logData vd
