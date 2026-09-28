@@ -1,5 +1,5 @@
 # Stage 1: Build the Haskell project
-FROM haskell:9.10-bookworm AS builder
+FROM haskell:9.14-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
