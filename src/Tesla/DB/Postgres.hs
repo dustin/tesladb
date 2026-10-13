@@ -5,18 +5,20 @@ module Tesla.DB.Postgres (runStr, runConn) where
 
 import           Control.Exception          (throwIO)
 import qualified Data.Aeson                 as J
-import           Data.ByteString.Char8      (pack)
 import qualified Data.ByteString.Lazy       as BL
 import           Data.Foldable              (toList)
 import qualified Data.Text                  as T
 import           Data.Time.Clock            (UTCTime)
-import           Hasql.Connection           (Connection, acquire)
-import           Hasql.Session              (Session, run)
+import           Hasql.Connection           (Connection, acquire, use)
+import qualified Hasql.Connection.Settings  as Settings
+import           Hasql.Errors               (toDetailedText)
+import           Hasql.Session              (Session)
 import qualified Hasql.Session              as Session
 import           Hasql.TH
 import qualified Hasql.Transaction          as TX
 import           Hasql.Transaction.Sessions (transaction)
 import qualified Hasql.Transaction.Sessions as TX
+import qualified Pqi.Ffi
 
 import           Effectful                  (Eff, IOE, liftIO, (:>))
 import           Effectful.Dispatch.Dynamic (interpret_)
@@ -25,7 +27,7 @@ import           Tesla.Car                  (VehicleData, teslaTS)
 import           Tesla.DB
 
 runStr :: IOE :> es => String -> Eff (DB : es) a -> Eff es a
-runStr s f = liftIO (acquire (pack s)) >>= either (error . show) (flip runConn f)
+runStr s f = liftIO (acquire Pqi.Ffi.adapter (Settings.connectionString (T.pack s))) >>= either (error . show) (flip runConn f)
 
 runConn :: forall es a. (IOE :> es) => Connection -> Eff (DB : es) a -> Eff es a
 runConn db = interpret_ \case
@@ -39,12 +41,12 @@ runConn db = interpret_ \case
 
   where
     rundb :: Session b -> Eff es b
-    rundb f = liftIO $ either throwIO pure =<< run f db
+    rundb f = liftIO $ either (throwIO . userError . T.unpack . toDetailedText) pure =<< use db f
 
 pdbInit :: Session ()
 pdbInit = do
-  Session.sql "create table if not exists data (ts timestamp not null primary key, vts timestamptz generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored, data jsonb not null);"
-  Session.sql "create table if not exists authinfo (ts timestamp, access_token varchar, refresh_token varchar, expires_in int);"
+  Session.script "create table if not exists data (ts timestamp not null primary key, vts timestamptz generated always as (to_timestamp(cast (data->'vehicle_state'->>'timestamp' as real) / 1000.0) at time zone 'US/Pacific') stored, data jsonb not null);"
+  Session.script "create table if not exists authinfo (ts timestamp, access_token varchar, refresh_token varchar, expires_in int);"
 
 pinsertVData :: VehicleData -> Session ()
 pinsertVData vdata = Session.statement (teslaTS vdata, J.decode vdata) st

@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 7ef14f711b910589e0fd9384aa94ccb181de22b30cd8b0964a9d170d33e58084
+-- hash: 4e66288176fb9801bbcc70c02e4844a747119ad6c312be07874207c5b9c83451
 
 name:           tesladb
 version:        0.3.0.0
@@ -73,9 +73,9 @@ library
     , effectful-th
     , exceptions
     , generic-deriving
-    , hasql <1.9
-    , hasql-th <1.9
-    , hasql-transaction <1.9
+    , hasql >=2.0
+    , hasql-th >=0.5
+    , hasql-transaction >=1.2.3
     , http-client
     , lens
     , lens-aeson
@@ -84,6 +84,7 @@ library
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
+    , pqi-ffi
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -134,9 +135,9 @@ executable teslacatcher
     , effectful-th
     , exceptions
     , generic-deriving
-    , hasql <1.9
-    , hasql-th <1.9
-    , hasql-transaction <1.9
+    , hasql >=2.0
+    , hasql-th >=0.5
+    , hasql-transaction >=1.2.3
     , http-client
     , lens
     , lens-aeson
@@ -146,6 +147,7 @@ executable teslacatcher
     , net-mqtt-rpc >=0.2
     , network-uri
     , optparse-applicative
+    , pqi-ffi
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -197,9 +199,9 @@ executable tesladb
     , effectful-th
     , exceptions
     , generic-deriving
-    , hasql <1.9
-    , hasql-th <1.9
-    , hasql-transaction <1.9
+    , hasql >=2.0
+    , hasql-th >=0.5
+    , hasql-transaction >=1.2.3
     , http-client
     , lens
     , lens-aeson
@@ -208,6 +210,7 @@ executable tesladb
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
+    , pqi-ffi
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
@@ -259,9 +262,9 @@ executable teslauth
     , effectful-th
     , exceptions
     , generic-deriving
-    , hasql <1.9
-    , hasql-th <1.9
-    , hasql-transaction <1.9
+    , hasql >=2.0
+    , hasql-th >=0.5
+    , hasql-transaction >=1.2.3
     , http-client
     , lens
     , lens-aeson
@@ -270,6 +273,7 @@ executable teslauth
     , net-mqtt >=0.8
     , network-uri
     , optparse-applicative
+    , pqi-ffi
     , sqlite-simple
     , stm
     , tesla >=0.7.5.0
