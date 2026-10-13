@@ -31,9 +31,10 @@ dependencies:
 - http-client
 - containers
 - sqlite-simple
-- hasql < 1.9
-- hasql-th < 1.9
-- hasql-transaction < 1.9
+- hasql >= 2.0
+- pqi-ffi
+- hasql-th >= 0.5
+- hasql-transaction >= 1.2.3
 - optparse-applicative
 - network-uri
 - async
